@@ -1,4 +1,4 @@
-# Organisons — v0.1
+# Organisons — v0.2
 
 Application de bureau pour classer, filtrer et préparer ses traces GPX, dans l'esprit de Pédalons.
 Tauri 2 (cœur en Rust) + React, Mantine et MapLibre.
@@ -24,14 +24,26 @@ Tauri 2 (cœur en Rust) + React, Mantine et MapLibre.
   - tags, notes et type de revêtement enregistrés dans l'index.
 - **Fond de carte** : OpenFreeMap (gratuit, sans clé). Sans internet, la carte passe sur un fond uni et la trace reste visible.
 
-Prévu en v0.2 (déjà présent dans les maquettes) :
+## Nouveautés de la v0.2
+
+- **Noms des points d'intérêt** masqués sur une vue d'ensemble (zoom < 11), affichés en zoomant ; le nom reste visible au survol de la pastille.
+- **Tags et notes dans le GPX** : option par bibliothèque (activée par défaut pour une bibliothèque gérée). Ils sont écrits dans `<extensions>` sans toucher au reste du fichier, et relus si l'index est remis à zéro. Le fichier modifié est vérifié (même nombre de points) avant de remplacer l'original.
+- **Sport** : lu dans le champ `<type>` du GPX (Komoot, Garmin…) et modifiable sur la fiche : Route, Gravel, VTT, Randonnée, Course à pied, Vélo par défaut.
+- **Bibliothèques gérées** :
+  - « Importer des GPX… » copie les fichiers directement à leur place ; les originaux ne bougent pas ;
+  - « Ranger… » montre d'abord la liste des déplacements, et rien ne bouge avant validation ;
+  - modèle `{sport}/{annee}/{nom}.gpx`, avec aussi `{mois}`, `{source}` et `{collection}` ;
+  - noms rendus compatibles avec Windows et les NAS, numérotés « (2) » en cas de doublon de nom ; dossiers vidés supprimés.
+- **Écran Tags** : nombre de traces par tag, renommage (fusion si le nom existe déjà), suppression. Les GPX concernés sont réécrits.
+- **Écran Collections** : listes nommées de traces, une trace pouvant appartenir à plusieurs. On les remplit depuis la fiche, et on les filtre dans la Bibliothèque.
+- **Écran Doublons** : fichiers identiques et doublons probables (même distance, D+, départ et arrivée). Rien n'est supprimé : « Mettre de côté » déplace le fichier dans le dossier caché `.organisons-doublons` de sa bibliothèque.
+
+Toujours prévu (déjà présent dans les maquettes) :
 - synchronisation Komoot ;
 - Agenda Pédalons ;
 - envoi vers Garmin, Hammerhead et Wahoo, et copie USB vers un Edge ;
-- rangement automatique des fichiers dans une bibliothèque gérée ;
-- écriture des tags et notes dans le GPX ;
 - revêtement calculé depuis OpenStreetMap ;
-- écrans Doublons, Collections et Tags.
+- modèle de rangement modifiable dans les Réglages.
 
 ## Installer et lancer (Windows)
 
@@ -50,7 +62,7 @@ npm run tauri build    # produit l'installateur (.msi / .exe) dans target/releas
 
 Au premier lancement, va dans **Réglages** puis **Choisir le dossier…** et sélectionne ton dossier de GPX.
 
-L'index est enregistré dans `%APPDATA%\fr.organisons.app\index.sqlite`. Le supprimer remet l'appli à zéro ; tes fichiers GPX ne sont jamais modifiés.
+L'index est enregistré dans `%APPDATA%\fr.organisons.app\index.sqlite`. Le supprimer remet l'appli à zéro (les tags et notes écrits dans les GPX reviennent à la relecture). Tes fichiers GPX ne sont modifiés que si tu l'as autorisé : écriture des tags et notes (option par bibliothèque), rangement validé dans l'aperçu, doublon mis de côté.
 
 ## Organisation du code
 

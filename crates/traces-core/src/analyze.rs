@@ -209,6 +209,19 @@ pub fn analyze_gpx(gpx: &gpx::Gpx, fallback_name: &str) -> Option<TraceAnalysis>
         point_count: raw.len(),
         has_time,
         creator: gpx.creator.clone(),
+        sport_type: gpx
+            .tracks
+            .iter()
+            .find_map(|t| t.type_.clone())
+            .or_else(|| gpx.routes.iter().find_map(|r| r.type_.clone()))
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
+        date: gpx
+            .metadata
+            .as_ref()
+            .and_then(|m| m.time)
+            .map(|t| time::OffsetDateTime::from(t).unix_timestamp())
+            .or_else(|| raw.iter().find_map(|p| p.time).map(|t| t as i64)),
         profile,
         pois,
     })

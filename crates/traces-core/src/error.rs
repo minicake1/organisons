@@ -18,6 +18,8 @@ pub enum Error {
     Json(#[from] serde_json::Error),
     #[error("introuvable : {0}")]
     NotFound(String),
+    #[error("{0}")]
+    Invalid(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

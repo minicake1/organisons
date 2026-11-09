@@ -1,7 +1,54 @@
-/** Vignette SVG d'une trace à partir de son aperçu [lat, lon]. */
-export default function TrackThumb({ preview, height = 160 }: { preview: [number, number][]; height?: number }) {
-  const W = 300
-  const H = 180
+import { useEffect, useRef, useState } from 'react'
+import { requestThumb, THUMB_H, THUMB_W } from './thumbRenderer'
+
+/**
+ * Vignette d'une trace. Affiche d'abord un dessin simple (SVG), remplacé par
+ * une image avec fond de carte dès que la vignette est visible et rendue.
+ * Hors ligne, le dessin simple reste.
+ */
+export default function TrackThumb({ id, preview, height = 160 }: { id?: number; preview: [number, number][]; height?: number }) {
+  const box = useRef<HTMLDivElement | null>(null)
+  const key = id != null && preview.length > 1 ? `${id}:${preview.length}:${preview[0].join(',')}:${preview[preview.length - 1].join(',')}` : null
+  const [img, setImg] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!key || !box.current) return
+    let cancel = () => {}
+    let alive = true
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((e) => e.isIntersecting)) return
+        io.disconnect()
+        const r = requestThumb(key, preview)
+        cancel = r.cancel
+        if (r.cached) setImg(r.cached)
+        r.promise?.then((url) => alive && setImg(url)).catch(() => {})
+      },
+      { rootMargin: '200px' },
+    )
+    io.observe(box.current)
+    return () => {
+      alive = false
+      io.disconnect()
+      cancel()
+    }
+  }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div ref={box} style={{ position: 'relative', height, background: '#eef1ea', overflow: 'hidden' }}>
+      {img ? (
+        <img src={img} alt="" style={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }} />
+      ) : (
+        <SvgTrack preview={preview} height={height} />
+      )}
+    </div>
+  )
+}
+
+/** Dessin simple de la trace (en attendant l'image, ou hors ligne). */
+function SvgTrack({ preview, height }: { preview: [number, number][]; height: number }) {
+  const W = THUMB_W
+  const H = THUMB_H
   let d = ''
   if (preview.length > 1) {
     const lat0 = preview.reduce((s, p) => s + p[0], 0) / preview.length
@@ -15,7 +62,7 @@ export default function TrackThumb({ preview, height = 160 }: { preview: [number
     d = xs.map((x, i) => `${i ? 'L' : 'M'}${(ox + (x - x0) * s).toFixed(1)} ${(oy + (ys[i] - y0) * s).toFixed(1)}`).join('')
   }
   return (
-    <svg aria-hidden="true" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{ display: 'block', width: '100%', height, background: '#eef1ea' }}>
+    <svg aria-hidden="true" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{ display: 'block', width: '100%', height }}>
       <path d={d} fill="none" stroke="#ffffff" strokeWidth={6} strokeLinejoin="round" />
       <path d={d} fill="none" stroke="#e03131" strokeWidth={3} strokeLinejoin="round" />
     </svg>

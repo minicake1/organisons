@@ -188,6 +188,10 @@ pub struct TraceAnalysis {
     pub point_count: usize,
     pub has_time: bool,
     pub creator: Option<String>,
+    /// Champ `<type>` de la trace (Komoot, Garmin…), ex. « cycling ».
+    pub sport_type: Option<String>,
+    /// Date du parcours (secondes Unix) : `<metadata><time>` ou premier point horodaté.
+    pub date: Option<i64>,
     pub profile: Vec<ProfilePoint>,
     pub pois: Vec<Poi>,
 }
@@ -206,6 +210,8 @@ pub struct TraceSummary {
     pub wind: WindDirection,
     pub surface_type: Option<String>,
     pub source: String,
+    /// Dossier de sport (« Route », « Gravel »…) : choisi sur la fiche, sinon déduit du GPX.
+    pub sport: String,
     pub tags: Vec<String>,
     pub poi_count: i64,
     pub added_at: i64,
@@ -225,8 +231,25 @@ pub struct TraceDetail {
     pub notes: String,
     pub has_time: bool,
     pub creator: Option<String>,
+    /// Collections dont fait partie la trace.
+    pub collection_ids: Vec<i64>,
     pub profile: Vec<ProfilePoint>,
     pub pois: Vec<Poi>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Collection {
+    pub id: i64,
+    pub name: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagCount {
+    pub tag: String,
+    pub count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -238,6 +261,26 @@ pub struct Library {
     /// "index" (indexée sur place) ou "managed" (rangée automatiquement)
     pub mode: String,
     pub pattern: String,
+    /// Écrire les tags et notes dans les fichiers GPX (`<extensions>`).
+    pub write_gpx: bool,
+}
+
+/// Déplacement prévu par le rangement d'une bibliothèque gérée.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlannedMove {
+    pub trace_id: i64,
+    pub name: String,
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizeReport {
+    pub moved: usize,
+    pub imported: usize,
+    pub errors: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -267,6 +310,7 @@ pub struct TraceFilter {
     pub wind_near: bool,
     pub source: Option<String>,
     pub tag: Option<String>,
+    pub collection: Option<i64>,
     pub sort: SortKey,
     pub ascending: bool,
 }
@@ -287,4 +331,23 @@ pub struct ScanReport {
 pub struct DuplicateGroup {
     pub hash: String,
     pub paths: Vec<String>,
+}
+
+/// Contenu des dossiers `.organisons-doublons`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetAsideInfo {
+    pub count: usize,
+    pub bytes: u64,
+    /// Date de mise de côté la plus ancienne (secondes Unix).
+    pub oldest: Option<i64>,
+}
+
+/// Groupe de doublons pour l'écran Doublons.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuplicateSet {
+    /// "identical" (même fichier, octet pour octet) ou "probable" (même parcours).
+    pub kind: String,
+    pub traces: Vec<TraceSummary>,
 }

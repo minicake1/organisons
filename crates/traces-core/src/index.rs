@@ -61,7 +61,51 @@ CREATE TABLE IF NOT EXISTS pois (
     symbol   TEXT,
     PRIMARY KEY (trace_id, idx)
 );
+CREATE TABLE IF NOT EXISTS collections (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS collection_traces (
+    collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    trace_id      INTEGER NOT NULL REFERENCES traces(id) ON DELETE CASCADE,
+    PRIMARY KEY (collection_id, trace_id)
+);
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+-- Paires de traces que l'utilisateur a déclarées « pas des doublons » (a < b).
+CREATE TABLE IF NOT EXISTS not_duplicates (
+    a INTEGER NOT NULL REFERENCES traces(id) ON DELETE CASCADE,
+    b INTEGER NOT NULL REFERENCES traces(id) ON DELETE CASCADE,
+    PRIMARY KEY (a, b)
+);
 "#;
+
+/// Une trace avec ce qu'il faut pour calculer son chemin de rangement.
+#[derive(Debug, Clone)]
+pub struct OrganizeRow {
+    pub id: i64,
+    pub path: String,
+    pub name: String,
+    pub sport: String,
+    /// Date du parcours, ou à défaut du fichier (secondes Unix).
+    pub date: i64,
+    pub source: String,
+    /// Première collection (ordre alphabétique), s'il y en a une.
+    pub collection: Option<String>,
+}
+
+/// Erreur SQLite de contrainte d'unicité → message lisible.
+fn unique_err(e: rusqlite::Error, message: &str) -> Error {
+    match &e {
+        rusqlite::Error::SqliteFailure(f, _) if f.code == rusqlite::ErrorCode::ConstraintViolation => {
+            Error::Invalid(message.into())
+        }
+        _ => Error::Db(e),
+    }
+}
 
 /// État d'un fichier déjà indexé, pour savoir s'il faut le relire.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,27 +134,324 @@ impl Index {
 
     fn init(conn: Connection) -> Result<Self> {
         conn.execute_batch(SCHEMA)?;
-        Ok(Self { conn })
+        let index = Self { conn };
+        index.migrate()?;
+        Ok(index)
+    }
+
+    /// Colonnes ajoutées après la v0.1 : une base existante est complétée sans perte.
+    fn migrate(&self) -> Result<()> {
+        for (table, column, decl) in [
+            ("libraries", "write_gpx", "INTEGER NOT NULL DEFAULT 0"),
+            ("traces", "sport", "TEXT NOT NULL DEFAULT 'Vélo'"),
+            ("traces", "sport_user", "TEXT"),
+            ("traces", "gpx_date", "INTEGER"),
+        ] {
+            let exists: bool = self.conn.query_row(
+                &format!("SELECT COUNT(*) > 0 FROM pragma_table_info('{table}') WHERE name = ?1"),
+                [column],
+                |r| r.get(0),
+            )?;
+            if !exists {
+                self.conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"))?;
+            }
+        }
+        Ok(())
     }
 
     // ---- Bibliothèques -------------------------------------------------
 
-    pub fn add_library(&self, name: &str, path: &str, mode: &str, pattern: &str) -> Result<Library> {
+    pub fn add_library(&self, name: &str, path: &str, mode: &str, pattern: &str, write_gpx: bool) -> Result<Library> {
         self.conn.execute(
-            "INSERT INTO libraries(name, path, mode, pattern) VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(path) DO UPDATE SET name = excluded.name, mode = excluded.mode, pattern = excluded.pattern",
-            params![name, path, mode, pattern],
+            "INSERT INTO libraries(name, path, mode, pattern, write_gpx) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(path) DO UPDATE SET name = excluded.name, mode = excluded.mode, pattern = excluded.pattern,
+             write_gpx = excluded.write_gpx",
+            params![name, path, mode, pattern, write_gpx],
         )?;
         let id: i64 = self.conn.query_row("SELECT id FROM libraries WHERE path = ?1", [path], |r| r.get(0))?;
-        Ok(Library { id, name: name.into(), path: path.into(), mode: mode.into(), pattern: pattern.into() })
+        self.library(id)
     }
 
     pub fn libraries(&self) -> Result<Vec<Library>> {
-        let mut st = self.conn.prepare("SELECT id, name, path, mode, pattern FROM libraries ORDER BY id")?;
-        let rows = st.query_map([], |r| {
-            Ok(Library { id: r.get(0)?, name: r.get(1)?, path: r.get(2)?, mode: r.get(3)?, pattern: r.get(4)? })
+        let mut st = self.conn.prepare("SELECT id, name, path, mode, pattern, write_gpx FROM libraries ORDER BY id")?;
+        let rows = st.query_map([], row_to_library)?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    pub fn library(&self, id: i64) -> Result<Library> {
+        self.conn
+            .query_row("SELECT id, name, path, mode, pattern, write_gpx FROM libraries WHERE id = ?1", [id], row_to_library)
+            .optional()?
+            .ok_or_else(|| Error::NotFound(format!("bibliothèque {id}")))
+    }
+
+    pub fn set_library_write_gpx(&self, id: i64, write_gpx: bool) -> Result<()> {
+        self.conn.execute("UPDATE libraries SET write_gpx = ?2 WHERE id = ?1", params![id, write_gpx])?;
+        Ok(())
+    }
+
+    /// Bibliothèque, chemin, tags et notes d'une trace (pour écrire dans son GPX).
+    pub fn trace_file(&self, id: i64) -> Result<(Library, String, Vec<String>, String)> {
+        let (library_id, path, notes): (i64, String, String) = self
+            .conn
+            .query_row("SELECT library_id, path, notes FROM traces WHERE id = ?1", [id], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .optional()?
+            .ok_or_else(|| Error::NotFound(format!("trace {id}")))?;
+        let mut st = self.conn.prepare("SELECT tag FROM tags WHERE trace_id = ?1 ORDER BY tag COLLATE NOCASE")?;
+        let tags = st.query_map([id], |r| r.get(0))?.collect::<std::result::Result<_, _>>()?;
+        Ok((self.library(library_id)?, path, tags, notes))
+    }
+
+    /// Met à jour l'état connu du fichier (après écriture ou déplacement par l'appli),
+    /// pour que la prochaine relecture ne le réanalyse pas inutilement.
+    pub fn set_file_state(&self, id: i64, path: &str, hash: &str, size: i64, mtime: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE traces SET path = ?2, file_hash = ?3, file_size = ?4, file_mtime = ?5 WHERE id = ?1",
+            params![id, path, hash, size, mtime],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_path(&self, id: i64, path: &str) -> Result<()> {
+        self.conn.execute("UPDATE traces SET path = ?2 WHERE id = ?1", params![id, path])?;
+        Ok(())
+    }
+
+    /// Traces d'une bibliothèque avec ce qu'il faut pour les ranger.
+    pub fn organize_rows(&self, library_id: i64) -> Result<Vec<OrganizeRow>> {
+        let mut st = self.conn.prepare(
+            "SELECT t.id, t.path, t.name, COALESCE(t.sport_user, t.sport), COALESCE(t.gpx_date, t.file_mtime), t.source,
+                    (SELECT c.name FROM collections c JOIN collection_traces ct ON ct.collection_id = c.id
+                     WHERE ct.trace_id = t.id ORDER BY c.name COLLATE NOCASE LIMIT 1)
+             FROM traces t WHERE t.library_id = ?1 ORDER BY t.path",
+        )?;
+        let rows = st.query_map([library_id], |r| {
+            Ok(OrganizeRow {
+                id: r.get(0)?,
+                path: r.get(1)?,
+                name: r.get(2)?,
+                sport: r.get(3)?,
+                date: r.get(4)?,
+                source: r.get(5)?,
+                collection: r.get(6)?,
+            })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    // ---- Collections ---------------------------------------------------
+
+    pub fn collections(&self) -> Result<Vec<Collection>> {
+        let mut st = self.conn.prepare(
+            "SELECT c.id, c.name, (SELECT COUNT(*) FROM collection_traces ct WHERE ct.collection_id = c.id)
+             FROM collections c ORDER BY c.name COLLATE NOCASE",
+        )?;
+        let rows = st.query_map([], |r| Ok(Collection { id: r.get(0)?, name: r.get(1)?, count: r.get(2)? }))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    pub fn create_collection(&self, name: &str, now: i64) -> Result<Collection> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(Error::Invalid("le nom de la collection est vide".into()));
+        }
+        self.conn
+            .execute("INSERT INTO collections(name, created_at) VALUES (?1, ?2)", params![name, now])
+            .map_err(|e| unique_err(e, "une collection porte déjà ce nom"))?;
+        Ok(Collection { id: self.conn.last_insert_rowid(), name: name.into(), count: 0 })
+    }
+
+    pub fn rename_collection(&self, id: i64, name: &str) -> Result<()> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(Error::Invalid("le nom de la collection est vide".into()));
+        }
+        self.conn
+            .execute("UPDATE collections SET name = ?2 WHERE id = ?1", params![id, name])
+            .map_err(|e| unique_err(e, "une collection porte déjà ce nom"))?;
+        Ok(())
+    }
+
+    /// Supprime la collection (les traces restent dans la bibliothèque).
+    pub fn delete_collection(&self, id: i64) -> Result<()> {
+        self.conn.execute("DELETE FROM collections WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    pub fn set_trace_collections(&mut self, trace_id: i64, ids: &[i64]) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        tx.execute("DELETE FROM collection_traces WHERE trace_id = ?1", [trace_id])?;
+        for c in ids {
+            tx.execute(
+                "INSERT OR IGNORE INTO collection_traces(collection_id, trace_id) VALUES (?1, ?2)",
+                params![c, trace_id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    // ---- Tags ----------------------------------------------------------
+
+    pub fn tag_counts(&self) -> Result<Vec<TagCount>> {
+        let mut st = self.conn.prepare("SELECT tag, COUNT(*) FROM tags GROUP BY tag ORDER BY tag COLLATE NOCASE")?;
+        let rows = st.query_map([], |r| Ok(TagCount { tag: r.get(0)?, count: r.get(1)? }))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Renomme un tag partout ; vers un tag existant, les deux fusionnent.
+    /// Renvoie les traces concernées (pour réécrire leur GPX).
+    pub fn rename_tag(&mut self, old: &str, new: &str) -> Result<Vec<i64>> {
+        let new = new.trim();
+        if new.is_empty() {
+            return Err(Error::Invalid("le nouveau nom du tag est vide".into()));
+        }
+        let ids = self.trace_ids_with_tag(old)?;
+        let tx = self.conn.transaction()?;
+        tx.execute("INSERT OR IGNORE INTO tags(trace_id, tag) SELECT trace_id, ?2 FROM tags WHERE tag = ?1", params![old, new])?;
+        if old != new {
+            tx.execute("DELETE FROM tags WHERE tag = ?1", [old])?;
+        }
+        tx.commit()?;
+        Ok(ids)
+    }
+
+    /// Retire un tag de toutes les traces. Renvoie les traces concernées.
+    pub fn delete_tag(&self, tag: &str) -> Result<Vec<i64>> {
+        let ids = self.trace_ids_with_tag(tag)?;
+        self.conn.execute("DELETE FROM tags WHERE tag = ?1", [tag])?;
+        Ok(ids)
+    }
+
+    fn trace_ids_with_tag(&self, tag: &str) -> Result<Vec<i64>> {
+        let mut st = self.conn.prepare("SELECT trace_id FROM tags WHERE tag = ?1")?;
+        let rows = st.query_map([tag], |r| r.get(0))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    // ---- Doublons ------------------------------------------------------
+
+    /// Fichiers identiques, puis doublons probables : même distance (±1 %),
+    /// même D+ (±5 % ou 30 m), départs et arrivées à moins de 300 m. Les
+    /// paires déclarées « pas des doublons » sont ignorées.
+    pub fn duplicate_sets(&self) -> Result<Vec<DuplicateSet>> {
+        let all = self.list(&TraceFilter { sort: SortKey::Date, ascending: true, ..Default::default() })?;
+        let mut hash_of = std::collections::HashMap::new();
+        {
+            let mut st = self.conn.prepare("SELECT id, file_hash FROM traces")?;
+            for row in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))? {
+                let (id, h) = row?;
+                hash_of.insert(id, h);
+            }
+        }
+        let mut excluded = std::collections::HashSet::new();
+        {
+            let mut st = self.conn.prepare("SELECT a, b FROM not_duplicates")?;
+            for row in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))? {
+                excluded.insert(row?);
+            }
+        }
+        let n = all.len();
+        let mut parent: Vec<usize> = (0..n).collect();
+        fn find(p: &mut [usize], i: usize) -> usize {
+            let mut r = i;
+            while p[r] != r {
+                r = p[r];
+            }
+            let mut i = i;
+            while p[i] != r {
+                let next = p[i];
+                p[i] = r;
+                i = next;
+            }
+            r
+        }
+        let ends = |t: &TraceSummary| (t.preview.first().copied(), t.preview.last().copied());
+        let near = |a: Option<[f64; 2]>, b: Option<[f64; 2]>| match (a, b) {
+            (Some(a), Some(b)) => crate::geo::haversine_km(a[0], a[1], b[0], b[1]) < 0.3,
+            _ => false,
+        };
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let (a, b) = (&all[i], &all[j]);
+                let pair = (a.id.min(b.id), a.id.max(b.id));
+                if excluded.contains(&pair) {
+                    continue;
+                }
+                let same_file = hash_of.get(&a.id) == hash_of.get(&b.id);
+                let same_route = (a.distance_km - b.distance_km).abs() <= 0.01 * a.distance_km.max(b.distance_km).max(1.0)
+                    && (a.elevation_gain - b.elevation_gain).abs() <= (0.05 * a.elevation_gain.max(b.elevation_gain)).max(30.0)
+                    && near(ends(a).0, ends(b).0)
+                    && near(ends(a).1, ends(b).1);
+                if same_file || same_route {
+                    let (ri, rj) = (find(&mut parent, i), find(&mut parent, j));
+                    parent[ri] = rj;
+                }
+            }
+        }
+        let mut groups: std::collections::BTreeMap<usize, Vec<usize>> = Default::default();
+        for i in 0..n {
+            let r = find(&mut parent, i);
+            groups.entry(r).or_default().push(i);
+        }
+        let mut sets: Vec<DuplicateSet> = groups
+            .into_values()
+            .filter(|g| g.len() > 1)
+            .map(|g| {
+                let first_hash = hash_of.get(&all[g[0]].id);
+                let all_same = g.iter().all(|&i| hash_of.get(&all[i].id) == first_hash);
+                DuplicateSet {
+                    kind: if all_same { "identical" } else { "probable" }.into(),
+                    traces: g.iter().map(|&i| all[i].clone()).collect(),
+                }
+            })
+            .collect();
+        sets.sort_by_key(|s| (s.kind != "identical", s.traces[0].added_at));
+        Ok(sets)
+    }
+
+    /// Déclare que ces traces ne sont pas des doublons entre elles.
+    pub fn mark_not_duplicates(&self, ids: &[i64]) -> Result<()> {
+        for (k, a) in ids.iter().enumerate() {
+            for b in &ids[k + 1..] {
+                self.conn.execute(
+                    "INSERT OR IGNORE INTO not_duplicates(a, b) VALUES (?1, ?2)",
+                    params![a.min(b), a.max(b)],
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    // ---- Réglages ------------------------------------------------------
+
+    pub fn setting(&self, key: &str) -> Result<Option<String>> {
+        Ok(self.conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get(0)).optional()?)
+    }
+
+    pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO settings(key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_trace(&self, id: i64) -> Result<()> {
+        self.conn.execute("DELETE FROM traces WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    pub fn set_sport(&self, id: i64, sport: Option<&str>) -> Result<()> {
+        self.conn.execute("UPDATE traces SET sport_user = ?2 WHERE id = ?1", params![id, sport])?;
+        Ok(())
+    }
+
+    /// Id d'une trace d'après son chemin.
+    pub fn trace_id_by_path(&self, path: &str) -> Result<Option<i64>> {
+        Ok(self.conn.query_row("SELECT id FROM traces WHERE path = ?1", [path], |r| r.get(0)).optional()?)
     }
 
     pub fn remove_library(&self, id: i64) -> Result<()> {
@@ -171,13 +512,15 @@ impl Index {
             a.creator,
             serde_json::to_string(&preview)?,
             serde_json::to_string(&a.profile)?,
+            crate::sport::sport_from_type(a.sport_type.as_deref()),
+            a.date,
         ];
         let id = if let Some(id) = existing {
             tx.execute(
                 "UPDATE traces SET library_id=?1, path=?2, file_hash=?3, file_size=?4, file_mtime=?5, name=?6,
                  distance_km=?7, elevation_gain=?8, elevation_loss=?9, ele_min=?10, ele_max=?11, hilliness=?12,
                  wind=?13, source=?14, start_lat=?15, start_lon=?16, bbox_json=?17, point_count=?18, has_time=?19,
-                 creator=?20, preview_json=?21, profile_json=?22 WHERE id = ?23",
+                 creator=?20, preview_json=?21, profile_json=?22, sport=?23, gpx_date=?24 WHERE id = ?25",
                 rusqlite::params_from_iter(values.iter().copied().chain(std::iter::once(&id as &dyn rusqlite::ToSql))),
             )?;
             tx.execute("DELETE FROM pois WHERE trace_id = ?1", [id])?;
@@ -186,8 +529,8 @@ impl Index {
             tx.execute(
                 "INSERT INTO traces(library_id, path, file_hash, file_size, file_mtime, name, distance_km,
                  elevation_gain, elevation_loss, ele_min, ele_max, hilliness, wind, source, start_lat, start_lon,
-                 bbox_json, point_count, has_time, creator, preview_json, profile_json, added_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)",
+                 bbox_json, point_count, has_time, creator, preview_json, profile_json, sport, gpx_date, added_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25)",
                 rusqlite::params_from_iter(values.iter().copied().chain(std::iter::once(&added_at as &dyn rusqlite::ToSql))),
             )?;
             tx.last_insert_rowid()
@@ -251,7 +594,8 @@ impl Index {
             "SELECT t.id, t.library_id, t.path, t.name, t.distance_km, t.elevation_gain, t.hilliness, t.wind,
                     t.surface_type, t.source, t.added_at, t.preview_json,
                     (SELECT COUNT(*) FROM pois p WHERE p.trace_id = t.id),
-                    (SELECT group_concat(tag, char(31)) FROM tags g WHERE g.trace_id = t.id)
+                    (SELECT group_concat(tag, char(31)) FROM tags g WHERE g.trace_id = t.id),
+                    COALESCE(t.sport_user, t.sport)
              FROM traces t WHERE 1=1",
         );
         let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -292,6 +636,14 @@ impl Index {
         if let Some(tag) = f.tag.as_deref().filter(|s| !s.is_empty()) {
             arg(&mut sql, &mut args, " AND EXISTS (SELECT 1 FROM tags g WHERE g.trace_id = t.id AND g.tag = ?)", Box::new(tag.to_string()));
         }
+        if let Some(c) = f.collection {
+            arg(
+                &mut sql,
+                &mut args,
+                " AND EXISTS (SELECT 1 FROM collection_traces c WHERE c.trace_id = t.id AND c.collection_id = ?)",
+                Box::new(c),
+            );
+        }
         let dir = if f.ascending { "ASC" } else { "DESC" };
         sql.push_str(&match f.sort {
             SortKey::Date => format!(" ORDER BY t.added_at {dir}, t.id {dir}"),
@@ -319,19 +671,20 @@ impl Index {
                         t.surface_type, t.source, t.added_at, t.preview_json,
                         (SELECT COUNT(*) FROM pois p WHERE p.trace_id = t.id),
                         (SELECT group_concat(tag, char(31)) FROM tags g WHERE g.trace_id = t.id),
+                        COALESCE(t.sport_user, t.sport),
                         t.elevation_loss, t.ele_min, t.ele_max, t.notes, t.has_time, t.creator, t.profile_json
                  FROM traces t WHERE t.id = ?1",
                 [id],
                 |r| {
                     Ok((
                         row_to_summary(r)?,
-                        r.get::<_, f64>(14)?,
                         r.get::<_, f64>(15)?,
                         r.get::<_, f64>(16)?,
-                        r.get::<_, String>(17)?,
-                        r.get::<_, bool>(18)?,
-                        r.get::<_, Option<String>>(19)?,
-                        r.get::<_, String>(20)?,
+                        r.get::<_, f64>(17)?,
+                        r.get::<_, String>(18)?,
+                        r.get::<_, bool>(19)?,
+                        r.get::<_, Option<String>>(20)?,
+                        r.get::<_, String>(21)?,
                     ))
                 },
             )
@@ -352,7 +705,10 @@ impl Index {
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut st = self.conn.prepare("SELECT collection_id FROM collection_traces WHERE trace_id = ?1")?;
+        let collection_ids = st.query_map([id], |r| r.get(0))?.collect::<std::result::Result<Vec<i64>, _>>()?;
         Ok(TraceDetail {
+            collection_ids,
             summary,
             elevation_loss: loss,
             ele_min,
@@ -385,6 +741,17 @@ impl Index {
     }
 }
 
+fn row_to_library(r: &rusqlite::Row) -> rusqlite::Result<Library> {
+    Ok(Library {
+        id: r.get(0)?,
+        name: r.get(1)?,
+        path: r.get(2)?,
+        mode: r.get(3)?,
+        pattern: r.get(4)?,
+        write_gpx: r.get(5)?,
+    })
+}
+
 fn row_to_summary(r: &rusqlite::Row) -> rusqlite::Result<TraceSummary> {
     let hill: String = r.get(6)?;
     let wind: String = r.get(7)?;
@@ -401,6 +768,7 @@ fn row_to_summary(r: &rusqlite::Row) -> rusqlite::Result<TraceSummary> {
         wind: WindDirection::parse(&wind).unwrap_or(WindDirection::N),
         surface_type: r.get(8)?,
         source: r.get(9)?,
+        sport: r.get(14)?,
         added_at: r.get(10)?,
         preview: serde_json::from_str(&preview).unwrap_or_default(),
         poi_count: r.get(12)?,

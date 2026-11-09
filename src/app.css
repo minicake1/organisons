@@ -22,4 +22,21 @@ body { background: #f8f9fa; }
   width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
   display: flex; align-items: center; justify-content: center; color: #fff; font: 800 12px Inter, sans-serif;
 }
-.poi-small { width: 10px; height: 10px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 2px rgba(0, 0, 0, 0.4); }
+/* Vue d'ensemble : seulement les pastilles (nom au survol). */
+.poi-labels-off .poi-big .label { display: none; }
+.poi-big .pin { pointer-events: auto; cursor: pointer; transition: transform 0.12s; }
+.poi-big .pin:hover { transform: scale(1.15); }
+.poi-small {
+  width: 14px; height: 14px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 3px rgba(0, 0, 0, 0.45);
+  cursor: pointer; transition: transform 0.12s;
+}
+.poi-small:hover { transform: scale(1.35); }
+/* Info-bulle des POI : fond de la couleur de la catégorie, coins arrondis. */
+.poi-tip { z-index: 5; pointer-events: none; }
+.poi-tip .maplibregl-popup-content {
+  background: var(--poi-color, #343a40); color: #fff; border-radius: 10px; padding: 7px 11px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25); font: 13px Inter, system-ui, sans-serif;
+}
+.poi-tip .maplibregl-popup-tip { display: none; }
+.poi-tip-name { font-weight: 700; line-height: 1.25; }
+.poi-tip-meta { font-size: 11px; opacity: 0.85; margin-top: 2px; }

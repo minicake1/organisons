@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => Index::open_in_memory()?,
     };
     let name = dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "Bibliothèque".into());
-    let lib = index.add_library(&name, &dir.to_string_lossy(), "index", "{sport}/{annee}/{nom}.gpx")?;
+    let lib = index.add_library(&name, &dir.to_string_lossy(), "index", "{sport}/{annee}/{nom}.gpx", false)?;
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
     let report = scan_library(&mut index, &lib, now)?;
     println!(

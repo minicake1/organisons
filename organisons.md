@@ -16,10 +16,14 @@ Tout le texte visible par l'utilisateur est en français.
 
 - `crates/traces-core` : aucune dépendance à Tauri.
   - `analyze.rs` : distance haversine ; altitude ré-échantillonnée tous les 50 m puis lissée sur 250 m ; D+ calculé avec un seuil de 3 m ; pente locale sur 200 m ; `slopeMax` par tronçon de profil ; vent idéal ; classement des POI ; profil de 200 à 2000 points.
-  - `index.rs` : SQLite (rusqlite, version embarquée), filtres et tri.
-  - `scan.rs` : parcours récursif des dossiers, empreinte SHA-256 (doublons), fichiers inchangés ignorés (taille et date identiques).
+  - `index.rs` : SQLite (rusqlite, version embarquée), filtres et tri, collections, tags, doublons (identiques par empreinte, probables par distance ±1 %, D+ ±5 % ou 30 m, départ et arrivée < 300 m). Les colonnes ajoutées après la v0.1 passent par `migrate()` (ALTER TABLE si absente) ; les nouvelles tables par `CREATE TABLE IF NOT EXISTS`.
+  - `scan.rs` : parcours récursif des dossiers (dossiers commençant par `.` ignorés), empreinte SHA-256, fichiers inchangés ignorés (taille et date identiques). Relit les tags et notes Organisons présents dans le GPX. `write_trace_meta` écrit dans le GPX si la bibliothèque l'autorise, puis met à jour l'état du fichier dans l'index.
+  - `gpxmeta.rs` : bloc `<organisons:meta>` (espace de noms `https://github.com/minicake1/organisons/gpx/1`) dans les `<extensions>` de `<gpx>`. Édition textuelle, le reste du fichier reste identique octet pour octet (ne pas réécrire avec le crate `gpx`, qui perdrait les extensions d'Openrunner et Garmin). Écriture refusée si le fichier n'est pas en UTF-8 ou si le nombre de points change ; fichier temporaire puis renommage.
+  - `organize.rs` : rangement des bibliothèques gérées (`plan` → aperçu, `apply` → déplacements revérifiés un par un), `import_files` (copie à sa place), `set_aside` (doublon déplacé dans `.organisons-doublons`). Variables du modèle : `{sport}`, `{annee}`/`{année}`, `{mois}`, `{source}`, `{collection}`, `{nom}`.
+  - `sport.rs` : `<type>` du GPX → dossier français (Route, Gravel, VTT, Randonnée, Course à pied ; Vélo par défaut). Choix sur la fiche dans `sport_user`.
 - `src-tauri/src/lib.rs` : commandes exposées à l'interface. Paramètres en snake_case côté Rust, camelCase côté JS. L'index est dans le dossier de données de l'appli (`index.sqlite`).
-- `src/` : pages Bibliothèque, Fiche trace et Réglages. `labels.ts` contient les libellés, les couleurs et `niceStep` (pas des graduations adaptés à la longueur et au dénivelé).
+- `src/` : pages Bibliothèque, Fiche trace, Collections, Tags, Doublons et Réglages. `labels.ts` contient les libellés, les couleurs et `niceStep` (pas des graduations adaptés à la longueur et au dénivelé).
+- Pas de Python sur le PC de développement (Windows) : faire les modifications de fichiers avec les outils d'édition ou `sed`.
 
 ## Règles de conception validées (maquettes v0.1 du 09/11/2026)
 
@@ -43,18 +47,29 @@ Tout le texte visible par l'utilisateur est en français.
   - les bornes kilométriques (fond blanc transparent à 60 %) sont tous les distance ÷ 7, arrondi « rond » ;
   - l'info-bulle donne km, pente, altitude, D+/D− cumulés et heure de passage si le GPX a des horaires ;
   - POI filtrables par catégorie et un par un, avec une case générale « afficher sur la carte ».
-- Stockage : NAS en bibliothèque « gérée », rangée selon `{sport}/{année}/{nom}.gpx` ; PC indexé sur place ; tags et notes écrits aussi dans le GPX ; doublons Komoot → demander à l'utilisateur.
+- Stockage : NAS en bibliothèque « gérée », rangée selon `{sport}/{année}/{nom}.gpx` ; PC indexé sur place ; doublons Komoot → demander à l'utilisateur.
 - Fond de carte OpenFreeMap (sans clé). Repli sur un fond uni hors ligne.
+- Carte : noms des POI masqués en dessous du zoom 11 (`POI_LABEL_MIN_ZOOM`), nom au survol de la pastille.
+
+## Choix validés pour la v0.2 (09/11/2026)
+
+- Écriture des tags et notes dans le GPX : **option par bibliothèque** (activée par défaut pour une bibliothèque gérée, désactivée pour une bibliothèque indexée sur place).
+- Rangement : **aperçu puis déplacement**. Les fichiers déjà présents ne bougent qu'après validation ; les fichiers importés par l'appli sont rangés directement (copie, l'original reste).
+- `{sport}` : tiré du champ `<type>` du GPX, modifiable sur la fiche.
+- Doublons : « Mettre de côté » déplace dans `.organisons-doublons`, en préfixant le nom par la date du jour (`AAAA-MM-JJ nom.gpx`), qui sert à calculer l'ancienneté (un déplacement garde la date du fichier). Vidage manuel avec confirmation, ou automatique après 7, 14 ou 30 jours (réglage `set_aside_purge_days` dans la table `settings`, appliqué au démarrage et à chaque relecture). « Ce ne sont pas des doublons » mémorise la paire (`not_duplicates`).
+- Importer et Ranger sont disponibles dans la Bibliothèque et dans les Réglages (composant `ManagedActions`).
+- Vignettes : une seule carte MapLibre cachée (`thumbRenderer.ts`) rend les vignettes visibles une par une en JPEG, gardées en mémoire pendant la session ; dessin SVG simple en attendant ou hors ligne.
+- POI sur la carte : info-bulle MapLibre (`.poi-tip`) aux coins arrondis, de la couleur de la catégorie. Liste des POI de la fiche groupée par catégorie (par défaut) ou triée par km.
+- Mantine 7 : `Group` n'accepte pas `component="form"`, il faut un vrai `<form>` autour.
 
 Maquettes (canevas claude.ai, version « v0.1 ») : https://claude.ai/artifact/UgMG2meavfQnAP5ptqqBpY
 
-## Prévu en v0.2
+## Reste à faire
 
 - **Komoot** : pas d'API publique, seulement une API partenaire B2B. Passer par l'API interne `https://api.komoot.de/v007/` (identifiants stockés dans le trousseau du système) ; peut cesser de fonctionner à tout moment.
 - **Agenda Pédalons** : le flux ICS ne contient que des liens vers les sorties, pas de GPX. Il faudra l'API de Pédalons avec le compte de l'utilisateur ; Pédalons n'a pas de clé d'accès personnelle, à ajouter côté Pédalons.
 - **Appareils GPS** : Garmin et Wahoo réservent leur API à des partenaires. Mode recommandé : passer par le compte Pédalons ; sinon copie USB dans `Garmin\NewFiles` vers un Edge.
-- **Rangement automatique** des bibliothèques gérées ; écriture des tags et notes dans `<extensions>` du GPX.
 - **Revêtement** calculé depuis OpenStreetMap, comme le fait Pédalons.
-- **Écrans** Doublons, Collections et Tags.
-- **Carte** : n'afficher les noms des POI qu'au-delà d'un certain zoom (aujourd'hui ils se chevauchent sur une vue d'ensemble).
+- **Réglages** : modèle de rangement modifiable (la maquette Stockage montre un champ et les variables), cache hors ligne du NAS, détection des doublons à l'import.
 - Lancement sous Windows 11 validé le 09/11/2026 (`npm run tauri dev`). Reste à tester le build de l'installateur (`npm run tauri build`).
+- Dépôt GitHub privé : https://github.com/minicake1/organisons (`gh` installé dans `C:\Program Files\GitHub CLI\`).

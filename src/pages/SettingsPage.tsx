@@ -1,16 +1,19 @@
 import { useEffect, useState } from 'react'
-import { ActionIcon, Badge, Button, Code, Group, Paper, Radio, Stack, Text, TextInput, Title, Tooltip } from '@mantine/core'
+import { ActionIcon, Badge, Button, Checkbox, Code, Group, Paper, Radio, Stack, Switch, Text, TextInput, Title, Tooltip } from '@mantine/core'
 import { IconFolderPlus, IconTrash } from '@tabler/icons-react'
 import { open } from '@tauri-apps/plugin-dialog'
 import { api, type Library, type ScanReport } from '../api'
+import ManagedActions, { type ActionResult } from '../components/ManagedActions'
 
 export default function SettingsPage() {
   const [libraries, setLibraries] = useState<Library[]>([])
   const [name, setName] = useState('')
   const [mode, setMode] = useState<Library['mode']>('index')
+  const [writeGpx, setWriteGpx] = useState(false)
   const [busy, setBusy] = useState(false)
   const [report, setReport] = useState<ScanReport | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [libReport, setLibReport] = useState<Record<number, ActionResult>>({})
 
   const refresh = () => api.listLibraries().then(setLibraries).catch((e) => setError(String(e)))
   useEffect(() => {
@@ -24,7 +27,7 @@ export default function SettingsPage() {
     setError(null)
     try {
       const label = name.trim() || dir.split(/[\\/]/).filter(Boolean).pop() || dir
-      setReport(await api.addLibrary(label, dir, mode))
+      setReport(await api.addLibrary(label, dir, mode, writeGpx))
       setName('')
       refresh()
     } catch (e) {
@@ -32,6 +35,14 @@ export default function SettingsPage() {
     } finally {
       setBusy(false)
     }
+  }
+
+  const toggleWrite = (l: Library, v: boolean) => {
+    setLibraries((ls) => ls.map((x) => (x.id === l.id ? { ...x, writeGpx: v } : x)))
+    api.setLibraryWriteGpx(l.id, v).catch((e) => {
+      setError(String(e))
+      refresh()
+    })
   }
 
   return (
@@ -48,22 +59,51 @@ export default function SettingsPage() {
           </Text>
         )}
         {libraries.map((l) => (
-          <Group key={l.id} p="md" style={{ borderBottom: '1px solid #f1f3f5' }} wrap="nowrap">
-            <Stack gap={4} style={{ flex: 1, minWidth: 0 }}>
-              <Group gap="xs">
-                <Text fw={600}>{l.name}</Text>
-                <Badge variant="light" color={l.mode === 'managed' ? 'indigo' : 'gray'}>
-                  {l.mode === 'managed' ? 'Bibliothèque gérée' : 'Indexée sur place'}
-                </Badge>
+          <Stack key={l.id} gap="xs" p="md" style={{ borderBottom: '1px solid #f1f3f5' }}>
+            <Group wrap="nowrap" align="flex-start">
+              <Stack gap={4} style={{ flex: 1, minWidth: 0 }}>
+                <Group gap="xs">
+                  <Text fw={600}>{l.name}</Text>
+                  <Badge variant="light" color={l.mode === 'managed' ? 'indigo' : 'gray'}>
+                    {l.mode === 'managed' ? 'Bibliothèque gérée' : 'Indexée sur place'}
+                  </Badge>
+                </Group>
+                <Code>{l.path}</Code>
+                {l.mode === 'managed' && (
+                  <Text size="xs" c="dimmed">
+                    Rangement : <Code>{l.pattern.replace('{annee}', '{année}')}</Code>
+                  </Text>
+                )}
+              </Stack>
+              <Tooltip label="Retirer de l'appli (les fichiers ne sont pas supprimés)">
+                <ActionIcon variant="subtle" color="red" aria-label={`Retirer ${l.name}`} onClick={() => api.removeLibrary(l.id).then(refresh)}>
+                  <IconTrash size={18} />
+                </ActionIcon>
+              </Tooltip>
+            </Group>
+            <Group gap="md">
+              <Switch
+                size="sm"
+                checked={l.writeGpx}
+                onChange={(e) => toggleWrite(l, e.currentTarget.checked)}
+                label="Écrire les tags et notes dans les fichiers GPX"
+                description="Ils restent ainsi attachés au fichier, même copié ailleurs."
+              />
+              <Group ml="auto">
+                <ManagedActions libraries={[l]} size="xs" onDone={(lib, r) => setLibReport((s) => ({ ...s, [lib.id]: r }))} />
               </Group>
-              <Code>{l.path}</Code>
-            </Stack>
-            <Tooltip label="Retirer de l'appli (les fichiers ne sont pas supprimés)">
-              <ActionIcon variant="subtle" color="red" aria-label={`Retirer ${l.name}`} onClick={() => api.removeLibrary(l.id).then(refresh)}>
-                <IconTrash size={18} />
-              </ActionIcon>
-            </Tooltip>
-          </Group>
+            </Group>
+            {libReport[l.id] && (
+              <Stack gap={2}>
+                <Text size="sm">{libReport[l.id].text}</Text>
+                {libReport[l.id].errors.map((e, i) => (
+                  <Text key={i} size="xs" c="red">
+                    {e}
+                  </Text>
+                ))}
+              </Stack>
+            )}
+          </Stack>
         ))}
       </Paper>
 
@@ -71,16 +111,29 @@ export default function SettingsPage() {
         <Stack gap="sm">
           <Text fw={600}>Ajouter un dossier</Text>
           <TextInput label="Nom affiché" placeholder="Ex. NAS · Vélo" value={name} onChange={(e) => setName(e.currentTarget.value)} />
-          <Radio.Group label="Mode" value={mode} onChange={(v) => setMode(v as Library['mode'])}>
+          <Radio.Group
+            label="Mode"
+            value={mode}
+            onChange={(v) => {
+              setMode(v as Library['mode'])
+              setWriteGpx(v === 'managed')
+            }}
+          >
             <Stack gap={6} mt={6}>
               <Radio value="index" label="Indexer sur place : l'appli lit les fichiers sans jamais les déplacer" />
               <Radio
                 value="managed"
-                label="Ranger automatiquement selon {sport}/{année}/{nom}.gpx"
-                description="Le rangement des fichiers arrive en v0.2 ; pour l'instant le dossier est seulement indexé."
+                label="Bibliothèque gérée : rangée selon {sport}/{année}/{nom}.gpx"
+                description="Les fichiers importés sont rangés directement ; les fichiers déjà présents ne bougent qu'après validation de l'aperçu « Ranger… »."
               />
             </Stack>
           </Radio.Group>
+          <Checkbox
+            checked={writeGpx}
+            onChange={(e) => setWriteGpx(e.currentTarget.checked)}
+            label="Écrire les tags et notes dans les fichiers GPX"
+            description="Modifiable ensuite pour chaque bibliothèque."
+          />
           <Group>
             <Button leftSection={<IconFolderPlus size={16} />} loading={busy} onClick={add}>
               Choisir le dossier…

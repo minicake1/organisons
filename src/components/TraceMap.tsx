@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import maplibregl from 'maplibre-gl'
 import type { Poi, ProfilePoint } from '../api'
-import { int, niceStep, poiKind, slopeColor } from '../labels'
+import { int, km1, niceStep, poiKind, slopeColor } from '../labels'
 import { boundsOf, line, setGeoJson, useMapLibre } from './useMapLibre'
 
 interface Props {
@@ -12,6 +12,9 @@ interface Props {
 }
 
 const ll = (p: ProfilePoint) => [p.lon, p.lat] as [number, number]
+
+/** En dessous de ce zoom, les noms des POI se chevauchent : on n'affiche que les pastilles. */
+const POI_LABEL_MIN_ZOOM = 11
 
 export default function TraceMap({ profile, pois, cursor, colorBySlope }: Props) {
   const { container, map } = useMapLibre()
@@ -66,13 +69,28 @@ export default function TraceMap({ profile, pois, cursor, colorBySlope }: Props)
     markers.current.push(new maplibregl.Marker({ element: start }).setLngLat(ll(profile[0])).addTo(map))
   }, [map, profile, colorBySlope, total])
 
-  // Points d'intérêt affichés.
+  // Points d'intérêt affichés, avec une info-bulle colorée au survol.
   useEffect(() => {
     if (!map) return
     poiMarkers.current.forEach((m) => m.remove())
+    const tip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, className: 'poi-tip', offset: 14, maxWidth: '260px' })
+    const showTip = (p: Poi, color: string, label: string, above: number) => {
+      const box = document.createElement('div')
+      const name = document.createElement('div')
+      name.className = 'poi-tip-name'
+      name.textContent = p.name || '(sans nom)'
+      const meta = document.createElement('div')
+      meta.className = 'poi-tip-meta'
+      meta.textContent = `${label} · km ${km1(p.km)}`
+      box.append(name, meta)
+      tip.setOffset(above).setLngLat([p.lon, p.lat]).setDOMContent(box).addTo(map)
+      tip.getElement()?.style.setProperty('--poi-color', color)
+    }
     poiMarkers.current = pois.map((p) => {
       const k = poiKind(p.kind)
       const el = document.createElement('div')
+      let marker: maplibregl.Marker
+      let target: HTMLElement = el
       if (k.big) {
         el.className = 'poi-big'
         const label = document.createElement('span')
@@ -84,14 +102,33 @@ export default function TraceMap({ profile, pois, cursor, colorBySlope }: Props)
         pin.style.background = k.color
         pin.textContent = p.kind === 'control' ? '✓' : '!'
         el.append(label, pin)
-        return new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([p.lon, p.lat]).addTo(map)
+        target = pin
+        marker = new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([p.lon, p.lat])
+      } else {
+        el.className = 'poi-small'
+        el.style.background = k.color
+        marker = new maplibregl.Marker({ element: el }).setLngLat([p.lon, p.lat])
       }
-      el.className = 'poi-small'
-      el.style.background = k.color
-      el.title = p.name
-      return new maplibregl.Marker({ element: el }).setLngLat([p.lon, p.lat]).addTo(map)
+      target.addEventListener('mouseenter', () => showTip(p, k.color, k.label, k.big ? 30 : 12))
+      target.addEventListener('mouseleave', () => tip.remove())
+      return marker.addTo(map)
     })
+    return () => {
+      tip.remove()
+    }
   }, [map, pois])
+
+  // Noms des POI masqués sur une vue d'ensemble, affichés en zoomant.
+  useEffect(() => {
+    if (!map) return
+    const update = () =>
+      map.getContainer().classList.toggle('poi-labels-off', map.getZoom() < POI_LABEL_MIN_ZOOM)
+    update()
+    map.on('zoom', update)
+    return () => {
+      map.off('zoom', update)
+    }
+  }, [map])
 
   // Curseur du profil → point et partie parcourue sur la carte.
   useEffect(() => {

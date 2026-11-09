@@ -6,11 +6,14 @@
 pub mod analyze;
 pub mod error;
 pub mod geo;
+pub mod gpxmeta;
 pub mod index;
 pub mod model;
+pub mod organize;
 pub mod scan;
+pub mod sport;
 
 pub use analyze::{analyze_file, analyze_gpx};
 pub use error::{Error, Result};
-pub use index::Index;
+pub use index::{Index, OrganizeRow};
 pub use model::*;

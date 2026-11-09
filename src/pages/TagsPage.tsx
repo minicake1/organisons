@@ -1,0 +1,160 @@
+import { useEffect, useState } from 'react'
+import { ActionIcon, Anchor, Badge, Button, Group, Modal, Paper, Stack, Table, Text, TextInput, Title, Tooltip } from '@mantine/core'
+import { IconPencil, IconTrash } from '@tabler/icons-react'
+import { api, type TagCount } from '../api'
+
+/** Écran Tags : nombre de traces par tag, renommage (fusion) et suppression. */
+export default function TagsPage({ onOpenTag }: { onOpenTag: (tag: string) => void }) {
+  const [tags, setTags] = useState<TagCount[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const [warnings, setWarnings] = useState<string[]>([])
+  const [editing, setEditing] = useState<TagCount | null>(null)
+  const [newName, setNewName] = useState('')
+  const [deleting, setDeleting] = useState<TagCount | null>(null)
+  const [query, setQuery] = useState('')
+
+  const refresh = () => api.tagCounts().then(setTags).catch((e) => setError(String(e)))
+  useEffect(() => {
+    refresh()
+  }, [])
+
+  const run = async (p: Promise<string[]>) => {
+    setError(null)
+    try {
+      setWarnings(await p)
+    } catch (e) {
+      setError(String(e))
+    }
+    refresh()
+  }
+
+  const target = tags.find((t) => t.tag === newName.trim() && t.tag !== editing?.tag)
+  const shown = tags.filter((t) => t.tag.toLowerCase().includes(query.trim().toLowerCase()))
+
+  return (
+    <Stack gap="md" maw={760}>
+      <Group>
+        <Title order={2} mr="auto">
+          Tags
+        </Title>
+        <TextInput placeholder="Rechercher un tag" value={query} onChange={(e) => setQuery(e.currentTarget.value)} w={240} />
+      </Group>
+      {error && (
+        <Text c="red" size="sm">
+          {error}
+        </Text>
+      )}
+      {warnings.length > 0 && (
+        <Paper withBorder p="sm" bg="orange.0">
+          <Text size="sm" fw={600}>
+            Index à jour, mais {warnings.length} fichier(s) GPX n'ont pas pu être réécrits :
+          </Text>
+          {warnings.slice(0, 5).map((w, i) => (
+            <Text key={i} size="xs">
+              {w}
+            </Text>
+          ))}
+        </Paper>
+      )}
+      <Paper withBorder radius="md">
+        {tags.length === 0 ? (
+          <Text p="md" c="dimmed" size="sm">
+            Aucun tag pour l'instant. On en ajoute depuis la fiche d'une trace.
+          </Text>
+        ) : (
+          <Table verticalSpacing="xs" highlightOnHover>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Tag</Table.Th>
+                <Table.Th w={110}>Traces</Table.Th>
+                <Table.Th w={90} />
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {shown.map((t) => (
+                <Table.Tr key={t.tag}>
+                  <Table.Td>
+                    <Anchor component="button" type="button" onClick={() => onOpenTag(t.tag)}>
+                      <Badge variant="light" style={{ cursor: 'pointer', textTransform: 'none' }}>
+                        {t.tag}
+                      </Badge>
+                    </Anchor>
+                  </Table.Td>
+                  <Table.Td>{t.count}</Table.Td>
+                  <Table.Td>
+                    <Group gap={4} justify="flex-end" wrap="nowrap">
+                      <Tooltip label="Renommer ou fusionner">
+                        <ActionIcon
+                          variant="subtle"
+                          aria-label={`Renommer ${t.tag}`}
+                          onClick={() => {
+                            setEditing(t)
+                            setNewName(t.tag)
+                          }}
+                        >
+                          <IconPencil size={16} />
+                        </ActionIcon>
+                      </Tooltip>
+                      <Tooltip label="Retirer ce tag de toutes les traces">
+                        <ActionIcon variant="subtle" color="red" aria-label={`Supprimer ${t.tag}`} onClick={() => setDeleting(t)}>
+                          <IconTrash size={16} />
+                        </ActionIcon>
+                      </Tooltip>
+                    </Group>
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        )}
+      </Paper>
+
+      <Modal opened={editing !== null} onClose={() => setEditing(null)} title={`Renommer « ${editing?.tag ?? ''} »`}>
+        <Stack gap="sm">
+          <TextInput label="Nouveau nom" value={newName} onChange={(e) => setNewName(e.currentTarget.value)} data-autofocus />
+          {target && (
+            <Text size="sm" c="orange.8">
+              Le tag « {target.tag} » existe déjà : les deux seront fusionnés ({(editing?.count ?? 0) + target.count} traces au plus).
+            </Text>
+          )}
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setEditing(null)}>
+              Annuler
+            </Button>
+            <Button
+              disabled={!newName.trim() || newName.trim() === editing?.tag}
+              onClick={() => {
+                if (editing) run(api.renameTag(editing.tag, newName.trim()))
+                setEditing(null)
+              }}
+            >
+              {target ? 'Fusionner' : 'Renommer'}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal opened={deleting !== null} onClose={() => setDeleting(null)} title="Supprimer le tag">
+        <Stack gap="sm">
+          <Text size="sm">
+            Retirer « {deleting?.tag} » de {deleting?.count} trace(s) ? Les traces elles-mêmes ne sont pas supprimées.
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setDeleting(null)}>
+              Annuler
+            </Button>
+            <Button
+              color="red"
+              onClick={() => {
+                if (deleting) run(api.deleteTag(deleting.tag))
+                setDeleting(null)
+              }}
+            >
+              Retirer le tag
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+    </Stack>
+  )
+}

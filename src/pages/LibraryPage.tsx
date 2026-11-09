@@ -25,6 +25,7 @@ import {
 import {
   IconChevronDown,
   IconChevronUp,
+  IconFileImport,
   IconFilter,
   IconLayoutGrid,
   IconLayoutSidebar,
@@ -33,17 +34,28 @@ import {
   IconRefresh,
   IconSearch,
 } from '@tabler/icons-react'
-import { api, type Hilliness, type Library, type SortKey, type TraceFilter, type TraceSummary, type Wind } from '../api'
+import { api, type Collection, type Hilliness, type Library, type SortKey, type TraceFilter, type TraceSummary, type Wind } from '../api'
 import { HILLINESS, SURFACES, WINDS, date, int, km1, windLabel, windShort } from '../labels'
 import TrackThumb from '../components/TrackThumb'
+import ManagedActions from '../components/ManagedActions'
 import WindArrow from '../components/WindArrow'
 import { AllTracesMap, SelectedTraceMap } from '../components/LibraryMaps'
 
 type View = 'grid' | 'split' | 'list' | 'map'
 const EMPTY: TraceFilter = { sort: 'date', ascending: false }
 
-export default function LibraryPage({ onOpen, onSettings }: { onOpen: (id: number) => void; onSettings: () => void }) {
-  const [filter, setFilter] = useState<TraceFilter>(EMPTY)
+export default function LibraryPage({
+  onOpen,
+  onSettings,
+  initialFilter,
+}: {
+  onOpen: (id: number) => void
+  onSettings: () => void
+  /** Filtre de départ (ouverture depuis l'écran Tags ou Collections). */
+  initialFilter?: TraceFilter
+}) {
+  const [filter, setFilter] = useState<TraceFilter>({ ...EMPTY, ...initialFilter })
+  const [collections, setCollections] = useState<Collection[]>([])
   const [traces, setTraces] = useState<TraceSummary[]>([])
   const [libraries, setLibraries] = useState<Library[]>([])
   const [tags, setTags] = useState<string[]>([])
@@ -52,6 +64,7 @@ export default function LibraryPage({ onOpen, onSettings }: { onOpen: (id: numbe
   const [selected, setSelected] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   const load = useCallback(() => {
     api.listTraces(filter).then(setTraces).catch((e) => setError(String(e)))
@@ -64,12 +77,13 @@ export default function LibraryPage({ onOpen, onSettings }: { onOpen: (id: numbe
   useEffect(() => {
     api.listLibraries().then(setLibraries).catch(() => {})
     api.allTags().then(setTags).catch(() => {})
+    api.collections().then(setCollections).catch(() => {})
   }, [])
 
   const set = <K extends keyof TraceFilter>(k: K, v: TraceFilter[K]) => setFilter((f) => ({ ...f, [k]: v ?? undefined }))
   const activeCount = useMemo(
     () =>
-      [filter.query, filter.hilliness, filter.surfaceType, filter.wind, filter.source, filter.tag].filter(Boolean).length +
+      [filter.query, filter.hilliness, filter.surfaceType, filter.wind, filter.source, filter.tag, filter.collection].filter(Boolean).length +
       (filter.distanceMin != null || filter.distanceMax != null ? 1 : 0) +
       (filter.elevationMin != null || filter.elevationMax != null ? 1 : 0),
     [filter],
@@ -106,10 +120,32 @@ export default function LibraryPage({ onOpen, onSettings }: { onOpen: (id: numbe
         <Title order={2} mr="auto">
           Bibliothèque
         </Title>
+        {libraries.some((l) => l.mode === 'managed') ? (
+          <ManagedActions
+            libraries={libraries}
+            onDone={(lib, r) => {
+              setNotice(`${lib.name} : ${r.text}`)
+              if (r.errors.length) setError(r.errors.slice(0, 5).join('\n'))
+              load()
+            }}
+          />
+        ) : (
+          <Tooltip label="L'import et le rangement se font dans une bibliothèque gérée : crée-en une dans Réglages.">
+            <Button variant="default" leftSection={<IconFileImport size={16} />} onClick={onSettings}>
+              Importer des GPX…
+            </Button>
+          </Tooltip>
+        )}
         <Button variant="default" leftSection={<IconRefresh size={16} />} loading={busy} onClick={rescan}>
           Relire les dossiers
         </Button>
       </Group>
+
+      {notice && (
+        <Paper withBorder p="sm" bg="teal.0" c="teal.9" onClick={() => setNotice(null)}>
+          {notice}
+        </Paper>
+      )}
 
       {error && (
         <Paper withBorder p="sm" bg="red.0" c="red.9" style={{ whiteSpace: 'pre-line' }} onClick={() => setError(null)}>
@@ -194,6 +230,17 @@ export default function LibraryPage({ onOpen, onSettings }: { onOpen: (id: numbe
                 onChange={(v) => set('source', v ?? undefined)}
               />
               <Select label="Tags" placeholder="Tous les tags" clearable searchable data={tags} value={filter.tag ?? null} onChange={(v) => set('tag', v ?? undefined)} />
+              {collections.length > 0 && (
+                <Select
+                  label="Collection"
+                  placeholder="Toutes les collections"
+                  clearable
+                  searchable
+                  data={collections.map((c) => ({ value: String(c.id), label: c.name }))}
+                  value={filter.collection != null ? String(filter.collection) : null}
+                  onChange={(v) => set('collection', v ? Number(v) : undefined)}
+                />
+              )}
               <Group gap="xs" align="flex-end" wrap="nowrap">
                 <Select
                   label="Trier par"
@@ -252,7 +299,7 @@ export default function LibraryPage({ onOpen, onSettings }: { onOpen: (id: numbe
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 3, xl: 4 }}>
           {traces.map((t) => (
             <Card key={t.id} withBorder padding={0} radius="md" component="button" onClick={() => onOpen(t.id)} style={{ textAlign: 'left', cursor: 'pointer' }}>
-              <TrackThumb preview={t.preview} />
+              <TrackThumb id={t.id} preview={t.preview} />
               <Stack gap={8} p="md">
                 <Text fw={700} lineClamp={1}>
                   {t.name}
@@ -263,6 +310,11 @@ export default function LibraryPage({ onOpen, onSettings }: { onOpen: (id: numbe
             </Card>
           ))}
         </SimpleGrid>
+      )}
+      {traces.length > 0 && view === 'grid' && (
+        <Text size="xs" c="dimmed" ta="right">
+          Fonds de carte © OpenFreeMap, données © contributeurs OpenStreetMap
+        </Text>
       )}
 
       {traces.length > 0 && view === 'split' && (

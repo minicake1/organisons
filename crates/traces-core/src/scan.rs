@@ -11,8 +11,9 @@ use walkdir::WalkDir;
 
 use crate::analyze::analyze_file;
 use crate::error::{Error, Result};
+use crate::gpxmeta::read_meta_file;
 use crate::index::Index;
-use crate::model::{Library, ScanReport};
+use crate::model::{Library, ScanReport, TraceAnalysis};
 
 /// Indexe tous les `.gpx` d'une bibliothèque. Les fichiers inchangés
 /// (même taille, même date) ne sont pas relus ; ceux qui ont disparu
@@ -49,13 +50,13 @@ pub fn scan_library(index: &mut Index, library: &Library, now: i64) -> Result<Sc
     Ok(report)
 }
 
-enum Outcome {
+pub(crate) enum Outcome {
     Added,
     Updated,
     Unchanged,
 }
 
-fn index_file(index: &mut Index, library: &Library, path: &Path, key: &str, now: i64) -> Result<Outcome> {
+pub(crate) fn index_file(index: &mut Index, library: &Library, path: &Path, key: &str, now: i64) -> Result<Outcome> {
     let meta = fs::metadata(path).map_err(|source| Error::Io { path: path.to_owned(), source })?;
     let size = meta.len() as i64;
     let mtime = meta
@@ -77,12 +78,44 @@ fn index_file(index: &mut Index, library: &Library, path: &Path, key: &str, now:
         }
     }
     let analysis = analyze_file(path)?;
-    let source = match analysis.creator.as_deref().map(str::to_lowercase) {
+    let source = source_of(&analysis);
+    let (id, added) = index.upsert_trace(library.id, key, &hash, size, mtime, source, now, &analysis)?;
+    // Tags et notes déjà écrits dans le GPX par Organisons : le fichier fait foi.
+    if let Some(meta) = read_meta_file(path) {
+        index.set_tags(id, &meta.tags)?;
+        index.set_notes(id, &meta.notes)?;
+    }
+    Ok(if added { Outcome::Added } else { Outcome::Updated })
+}
+
+/// Origine d'une trace d'après le logiciel qui a créé le GPX.
+pub fn source_of(analysis: &TraceAnalysis) -> &'static str {
+    match analysis.creator.as_deref().map(str::to_lowercase) {
         Some(c) if c.contains("komoot") => "komoot",
         _ => "local",
-    };
-    let (_, added) = index.upsert_trace(library.id, key, &hash, size, mtime, source, now, &analysis)?;
-    Ok(if added { Outcome::Added } else { Outcome::Updated })
+    }
+}
+
+/// Écrit les tags et notes de l'index dans le GPX de la trace, si sa
+/// bibliothèque l'autorise. Renvoie `true` si le fichier a été modifié.
+pub fn write_trace_meta(index: &Index, id: i64) -> Result<bool> {
+    let (library, path, tags, notes) = index.trace_file(id)?;
+    if !library.write_gpx {
+        return Ok(false);
+    }
+    let p = Path::new(&path);
+    let changed = crate::gpxmeta::write_meta_file(p, &crate::gpxmeta::GpxMeta { tags, notes })?;
+    if changed {
+        let meta = fs::metadata(p).map_err(|source| Error::Io { path: p.to_owned(), source })?;
+        let mtime = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        index.set_file_state(id, &path, &sha256_file(p)?, meta.len() as i64, mtime)?;
+    }
+    Ok(changed)
 }
 
 pub fn sha256_file(path: &Path) -> Result<String> {
