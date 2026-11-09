@@ -1,0 +1,25 @@
+html, body, #root { height: 100%; margin: 0; }
+body { background: #f8f9fa; }
+
+.km-mark {
+  min-width: 26px; height: 26px; padding: 0 4px; box-sizing: border-box;
+  border-radius: 13px; border: 2px solid #c92a2a; background: rgba(255, 255, 255, 0.4);
+  color: #212529; font: 700 11px Inter, system-ui, sans-serif;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); pointer-events: none;
+}
+.start-mark {
+  width: 28px; height: 28px; border-radius: 50%; background: #2b8a3e; border: 3px solid #fff;
+  color: #fff; font: 700 12px Inter, system-ui, sans-serif;
+  display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+.poi-big { display: flex; flex-direction: column; align-items: center; gap: 3px; pointer-events: none; }
+.poi-big .label {
+  color: #fff; font: 700 10px Inter, system-ui, sans-serif; text-transform: uppercase;
+  padding: 3px 6px; border-radius: 3px; white-space: nowrap; max-width: 170px; overflow: hidden; text-overflow: ellipsis;
+}
+.poi-big .pin {
+  width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  display: flex; align-items: center; justify-content: center; color: #fff; font: 800 12px Inter, sans-serif;
+}
+.poi-small { width: 10px; height: 10px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 2px rgba(0, 0, 0, 0.4); }
