@@ -1,0 +1,23 @@
+# Mises à jour Dependabot (hors failles de sécurité, gérées à part par les
+# « Dependabot security updates ») : une fois par mois, regroupées pour éviter
+# une avalanche de pull requests. Les versions majeures arrivent une par une,
+# car elles demandent souvent d'adapter le code (ex. MapLibre 5 → 6).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      npm-mineures:
+        update-types: [minor, patch]
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      cargo-mineures:
+        update-types: [minor, patch]
