@@ -80,11 +80,18 @@ Maquettes (canevas claude.ai, version « v0.1 ») : https://claude.ai/artifact/U
 - **Vignettes** : en passant de fenêtre à plein écran, elles ne se redessinent pas toutes seules (Ctrl+R nécessaire). Piste : recalculer à la taille du cadre (ResizeObserver) dans `TrackThumb.tsx`.
 - **Données de développement** : `npm run tauri dev` et la version installée partagent le même index (même identifiant d’appli). Les séparer ; la version installée garde la bibliothèque actuelle.
 - **Réglages** : modèle de rangement modifiable (la maquette Stockage montre un champ et les variables), détection des doublons à l’import, cache hors ligne du NAS.
+- **Tags automatiques** : proposer des tags détectés dans le titre et les métadonnées du GPX (`<desc>`, `<keywords>`, `<type>`, créateur…), par exemple « BRM », « 600 », « Gravel » ; à valider ou appliquer selon un réglage.
+- **Tri par sport** dans la Bibliothèque (en plus des tris actuels).
 
-### v0.4 : Komoot
+### v0.4 : tours
+- **Tours** : une collection de type « tour » qui regroupe plusieurs traces (étapes) dans une seule vue : carte avec toutes les étapes, profil enchaîné, bornes et POI de l’ensemble.
+- Chiffres pour le tour entier (distance, D+/D−, revêtement, nombre d’étapes) ou pour chaque GPX séparément (sélection d’une étape).
+- Ordre des étapes modifiable ; export possible du tour en un seul GPX ou étape par étape.
+
+### v0.5 : Komoot
 - Pas d’API publique, seulement une API partenaire B2B. Passer par l’API interne `https://api.komoot.de/v007/` (identifiants stockés dans le trousseau du système) ; peut cesser de fonctionner à tout moment.
 
-### v0.5 : appareils GPS
+### v0.6 : appareils GPS
 - Garmin et Wahoo réservent leur API à des partenaires. Mode recommandé : passer par le compte Pédalons ; sinon copie USB dans `Garmin\NewFiles` vers un Edge.
 
 ### Plus tard : agenda Pédalons
