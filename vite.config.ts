@@ -17,6 +17,9 @@ export default defineConfig({
         /[\\/](target|src-tauri|crates|node_modules|\.git)([\\/]|$)/.test(chemin),
     },
   },
+  // MapLibre 6 charge son worker par une URL : le pré-regroupement de Vite le casse.
+  optimizeDeps: { exclude: ['maplibre-gl'] },
   envPrefix: ['VITE_', 'TAURI_'],
-  build: { target: 'es2021', sourcemap: false },
+  // ES2022 : cible de MapLibre 6 (WebView2 le gère).
+  build: { target: 'es2022', sourcemap: false },
 })

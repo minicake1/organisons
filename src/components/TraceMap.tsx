@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import maplibregl from 'maplibre-gl'
+import * as maplibregl from 'maplibre-gl'
 import type { Poi, ProfilePoint } from '../api'
 import { int, km1, niceStep, poiKind } from '../labels'
 import { boundsOf, line, setGeoJson, useMapLibre } from './useMapLibre'

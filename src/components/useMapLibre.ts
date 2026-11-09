@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import maplibregl from 'maplibre-gl'
+import * as maplibregl from 'maplibre-gl'
 
 /** Fond de carte vectoriel gratuit, sans clé (OpenFreeMap, données OpenStreetMap). */
 export const MAP_STYLE = 'https://tiles.openfreemap.org/styles/liberty'

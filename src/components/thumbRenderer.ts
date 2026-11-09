@@ -2,7 +2,7 @@
 // les traces une par une (une carte WebGL par vignette serait trop lourde : le
 // navigateur limite le nombre de contextes WebGL). Les images restent en
 // mémoire pendant la session.
-import maplibregl from 'maplibre-gl'
+import * as maplibregl from 'maplibre-gl'
 import { MAP_STYLE } from './useMapLibre'
 
 /** Taille par défaut ; chaque vignette est rendue à sa taille affichée (×2 pour la netteté). */
