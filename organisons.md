@@ -67,11 +67,25 @@ Tout le texte visible par l'utilisateur est en français.
 
 Maquettes (canevas claude.ai, version « v0.1 ») : https://claude.ai/artifact/UgMG2meavfQnAP5ptqqBpY
 
-## Reste à faire
+## Build et dépôt
 
-- **Komoot** : pas d'API publique, seulement une API partenaire B2B. Passer par l'API interne `https://api.komoot.de/v007/` (identifiants stockés dans le trousseau du système) ; peut cesser de fonctionner à tout moment.
-- **Agenda Pédalons** : le flux ICS ne contient que des liens vers les sorties, pas de GPX. Il faudra l'API de Pédalons avec le compte de l'utilisateur ; Pédalons n'a pas de clé d'accès personnelle, à ajouter côté Pédalons.
-- **Appareils GPS** : Garmin et Wahoo réservent leur API à des partenaires. Mode recommandé : passer par le compte Pédalons ; sinon copie USB dans `Garmin\NewFiles` vers un Edge.
-- **Réglages** : modèle de rangement modifiable (la maquette Stockage montre un champ et les variables), cache hors ligne du NAS, détection des doublons à l'import.
-- Lancement sous Windows 11 validé le 09/11/2026 (`npm run tauri dev`). Reste à tester le build de l'installateur (`npm run tauri build`).
+- Lancement sous Windows 11 validé le 09/11/2026 (`npm run tauri dev`).
+- Build validé le 09/11/2026 (`npm run tauri build`, environ 5 min) : `target/release/organisons.exe` et les installateurs `bundle/nsis/*-setup.exe` (3,3 Mo) et `bundle/msi/*.msi` (4,6 Mo), en français (`bundle.windows` de `tauri.conf.json`). Les deux installent pour tout l’ordinateur, dans Program Files (`installMode: perMachine`). Fermer `target/release/organisons.exe` avant un build, sinon erreur « fichier utilisé ».
+- L’installateur n’embarque aucune donnée : l’index est dans `%APPDATA%/fr.organisons.app/index.sqlite`.
 - Dépôt GitHub privé : https://github.com/minicake1/organisons (`gh` installé dans `C:\Program Files\GitHub CLI\`).
+
+## Feuille de route
+
+### v0.3 : finitions et réglages
+- **Vignettes** : en passant de fenêtre à plein écran, elles ne se redessinent pas toutes seules (Ctrl+R nécessaire). Piste : recalculer à la taille du cadre (ResizeObserver) dans `TrackThumb.tsx`.
+- **Données de développement** : `npm run tauri dev` et la version installée partagent le même index (même identifiant d’appli). Les séparer ; la version installée garde la bibliothèque actuelle.
+- **Réglages** : modèle de rangement modifiable (la maquette Stockage montre un champ et les variables), détection des doublons à l’import, cache hors ligne du NAS.
+
+### v0.4 : Komoot
+- Pas d’API publique, seulement une API partenaire B2B. Passer par l’API interne `https://api.komoot.de/v007/` (identifiants stockés dans le trousseau du système) ; peut cesser de fonctionner à tout moment.
+
+### v0.5 : appareils GPS
+- Garmin et Wahoo réservent leur API à des partenaires. Mode recommandé : passer par le compte Pédalons ; sinon copie USB dans `Garmin\NewFiles` vers un Edge.
+
+### Plus tard : agenda Pédalons
+- Le flux ICS ne contient que des liens vers les sorties, pas de GPX. Il faudra l’API de Pédalons avec le compte de l’utilisateur ; Pédalons n’a pas de clé d’accès personnelle, à ajouter côté Pédalons.
