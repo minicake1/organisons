@@ -31,9 +31,38 @@ pub fn sport_from_type(gpx_type: Option<&str>) -> &'static str {
     }
 }
 
+/// Sport d'une trace : le `<type>` du GPX, sinon un mot du titre (Openrunner
+/// n'écrit pas de `<type>`) : « gravel », « VTT », « rando »…
+pub fn sport_for(gpx_type: Option<&str>, name: &str) -> &'static str {
+    let from_type = sport_from_type(gpx_type);
+    if from_type != DEFAULT_SPORT {
+        return from_type;
+    }
+    let n = name.to_lowercase();
+    let has = |words: &[&str]| words.iter().any(|w| n.contains(w));
+    if has(&["gravel"]) {
+        "Gravel"
+    } else if has(&["vtt", "mtb"]) {
+        "VTT"
+    } else if has(&["rando", "hike", "hiking", "trek"]) {
+        "Randonnée"
+    } else {
+        DEFAULT_SPORT
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sport_par_le_titre() {
+        assert_eq!(sport_for(None, "np#614 super chill gravel"), "Gravel");
+        assert_eq!(sport_for(None, "Boucle VTT forêt"), "VTT");
+        assert_eq!(sport_for(None, "Le_Mythique_SBC_SPIDER_2022_2708"), "Vélo");
+        // Le <type> du GPX prime sur le titre.
+        assert_eq!(sport_for(Some("racebike"), "Route du gravel"), "Route");
+    }
 
     #[test]
     fn types_courants() {

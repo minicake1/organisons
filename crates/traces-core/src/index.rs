@@ -8,7 +8,7 @@ use crate::error::{Error, Result};
 use crate::model::*;
 
 /// Version des règles d’analyse : la changer fait relire tous les fichiers une fois.
-const ANALYSIS_VERSION: &str = "2";
+const ANALYSIS_VERSION: &str = "4";
 
 const SCHEMA: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -166,7 +166,7 @@ impl Index {
                 self.conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"))?;
             }
         }
-        // Règles d'analyse changées (2 : `mtb_easy` de Komoot = Gravel) : les fichiers
+        // Règles d’analyse changées (2 : `mtb_easy` de Komoot = Gravel ; 3 : sport lu dans le titre ; 4 : nom nettoyé et date du titre) : les fichiers
         // seront relus à la prochaine relecture des dossiers (tags, notes et collections gardés).
         if self.setting("analysis_version")?.as_deref() != Some(ANALYSIS_VERSION) {
             // Empreinte factice et unique : relecture complète sans créer de faux doublons.
@@ -529,7 +529,7 @@ impl Index {
             a.creator,
             serde_json::to_string(&preview)?,
             serde_json::to_string(&a.profile)?,
-            crate::sport::sport_from_type(a.sport_type.as_deref()),
+            crate::sport::sport_for(a.sport_type.as_deref(), &a.name),
             a.date,
         ];
         let id = if let Some(id) = existing {
@@ -643,6 +643,9 @@ impl Index {
         }
         if let Some(h) = f.hilliness {
             arg(&mut sql, &mut args, " AND t.hilliness = ?", Box::new(h.as_str()));
+        }
+        if let Some(s) = f.sport.as_deref().filter(|s| !s.is_empty()) {
+            arg(&mut sql, &mut args, " AND COALESCE(t.sport_user, t.sport) = ?", Box::new(s.to_string()));
         }
         if let Some(s) = f.surface_type.as_deref().filter(|s| !s.is_empty()) {
             arg(&mut sql, &mut args, " AND t.surface_type = ?", Box::new(s.to_string()));

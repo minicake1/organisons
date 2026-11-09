@@ -9,6 +9,7 @@ pub mod geo;
 pub mod gpxmeta;
 pub mod index;
 pub mod model;
+pub mod naming;
 pub mod organize;
 pub mod scan;
 pub mod sport;

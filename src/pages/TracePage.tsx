@@ -24,7 +24,8 @@ import {
 import { IconArrowLeft, IconCheck, IconChevronDown, IconDeviceWatch, IconFolderOpen, IconPencil } from '@tabler/icons-react'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
 import { api, type Collection, type Poi, type PoiKind, type TraceDetail } from '../api'
-import { HILLINESS, POI_KINDS, SURFACES, SURFACE_CLASSES, int, km1, poiKind, slopeColor, surfaceColor, windLabel } from '../labels'
+import SportBadge from '../components/SportBadge'
+import { HILLINESS, POI_KINDS, SURFACE_CLASSES, int, km1, poiKind, slopeColor, surfaceColor, windLabel } from '../labels'
 import { computeSurface } from '../osmSurface'
 import ElevationProfile from '../components/ElevationProfile'
 import TraceMap from '../components/TraceMap'
@@ -286,7 +287,7 @@ export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: {
               <>
               <Select
                 label="Sport"
-                description="Sert au rangement des bibliothèques gérées. Effacer pour revenir au type lu dans le GPX."
+                description="Sert au rangement des bibliothèques gérées. Effacer pour revenir au sport lu dans le GPX (ou dans son titre)."
                 clearable
                 allowDeselect={false}
                 data={sports.includes(t.sport) ? sports : [...sports, t.sport]}
@@ -296,17 +297,6 @@ export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: {
                     .setSport(t.id, v)
                     .then(() => (v ? setT({ ...t, sport: v }) : api.getTrace(t.id).then(setT)))
                     .catch((e) => setSaveError(String(e)))
-                }}
-              />
-              <Select
-                label="Type de revêtement"
-                placeholder="Non renseigné"
-                clearable
-                data={Object.entries(SURFACES).map(([value, label]) => ({ value, label }))}
-                value={t.surfaceType}
-                onChange={(v) => {
-                  setT({ ...t, surfaceType: v })
-                  api.setSurfaceType(t.id, v)
                 }}
               />
               <TagsInput
@@ -540,8 +530,7 @@ function ClassementView({ t, collections }: { t: TraceDetail; collections: Colle
   )
   return (
     <Stack gap={8}>
-      {row('Sport', <Text size="sm">{t.sport}</Text>)}
-      {row('Revêtement', t.surfaceType ? <Text size="sm">{SURFACES[t.surfaceType] ?? t.surfaceType}</Text> : none)}
+      {row('Sport', <SportBadge sport={t.sport} />)}
       {row(
         'Tags',
         t.tags.length ? (

@@ -162,7 +162,7 @@ pub fn analyze_gpx(gpx: &gpx::Gpx, fallback_name: &str) -> Option<TraceAnalysis>
         bbox[3] = bbox[3].max(p.lon);
     }
 
-    let name = gpx
+    let raw_name = gpx
         .tracks
         .iter()
         .find_map(|t| t.name.clone())
@@ -171,6 +171,10 @@ pub fn analyze_gpx(gpx: &gpx::Gpx, fallback_name: &str) -> Option<TraceAnalysis>
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| fallback_name.to_string());
+    // Nom affiché = nom du fichier rangé : sans « _ », date ni identifiant (voir `naming`).
+    let name = crate::naming::clean_name(&raw_name);
+    let title_date = crate::naming::date_in_name(&raw_name).and_then(|d| d.timestamp());
+    let route_id = crate::naming::route_id(&raw_name);
 
     let pois = gpx
         .waypoints
@@ -216,12 +220,16 @@ pub fn analyze_gpx(gpx: &gpx::Gpx, fallback_name: &str) -> Option<TraceAnalysis>
             .or_else(|| gpx.routes.iter().find_map(|r| r.type_.clone()))
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty()),
-        date: gpx
+        // La date du titre prime : l’heure des points d’un export Openrunner est celle de l’export.
+        date: title_date.or_else(|| {
+            gpx
             .metadata
             .as_ref()
             .and_then(|m| m.time)
             .map(|t| time::OffsetDateTime::from(t).unix_timestamp())
-            .or_else(|| raw.iter().find_map(|p| p.time).map(|t| t as i64)),
+                .or_else(|| raw.iter().find_map(|p| p.time).map(|t| t as i64))
+        }),
+        route_id,
         profile,
         pois,
     })

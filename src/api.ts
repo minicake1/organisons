@@ -100,6 +100,7 @@ export interface TraceFilter {
   elevationMax?: number
   hilliness?: Hilliness
   surfaceType?: string
+  sport?: string
   wind?: Wind
   windNear?: boolean
   source?: string
@@ -164,7 +165,6 @@ export const api = {
   getTrace: (id: number) => invoke<TraceDetail>('get_trace', { id }),
   setTags: (id: number, tags: string[]) => invoke<void>('set_tags', { id, tags }),
   setNotes: (id: number, notes: string) => invoke<void>('set_notes', { id, notes }),
-  setSurfaceType: (id: number, surface: string | null) => invoke<void>('set_surface_type', { id, surface }),
   allTags: () => invoke<string[]>('all_tags'),
   duplicates: () => invoke<DuplicateGroup[]>('duplicates'),
   collections: () => invoke<Collection[]>('collections'),

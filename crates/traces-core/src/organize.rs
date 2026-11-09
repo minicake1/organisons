@@ -14,7 +14,7 @@ use crate::error::Result;
 use crate::index::Index;
 use crate::model::{Library, OrganizeReport, PlannedMove, SetAsideInfo};
 use crate::scan;
-use crate::sport::sport_from_type;
+use crate::sport::sport_for;
 
 /// Année et mois (UTC) d'une date Unix.
 fn year_month(ts: i64) -> (i32, u8) {
@@ -67,10 +67,13 @@ pub fn sanitize(name: &str) -> String {
 
 /// Chemin voulu pour une trace, d'après le modèle de la bibliothèque.
 /// Variables : `{sport}`, `{annee}` (ou `{année}`), `{mois}`, `{source}`,
-/// `{collection}` (« Sans collection » à défaut) et `{nom}`.
+/// `{collection}` (« Sans collection » à défaut) et `{nom}` (nettoyé, voir [`crate::naming`]).
+/// L’année et le mois viennent de la date du titre s’il y en a une.
 pub fn target_path(library: &Library, v: &PathVars) -> PathBuf {
     let pattern = if library.pattern.trim().is_empty() { "{sport}/{annee}/{nom}.gpx" } else { &library.pattern };
-    let (year, month) = year_month(v.date);
+    // La date écrite dans le titre prime : l’heure des points d’un export Openrunner est celle de l’export.
+    let date = crate::naming::date_in_name(v.name).and_then(|d| d.timestamp()).unwrap_or(v.date);
+    let (year, month) = year_month(date);
     let mut path = PathBuf::from(&library.path);
     for part in pattern.split(['/', '\\']).filter(|p| !p.is_empty()) {
         let rendered = part
@@ -80,7 +83,7 @@ pub fn target_path(library: &Library, v: &PathVars) -> PathBuf {
             .replace("{mois}", &format!("{month:02}"))
             .replace("{source}", &sanitize(source_label(v.source)))
             .replace("{collection}", &sanitize(v.collection.unwrap_or("Sans collection")))
-            .replace("{nom}", &sanitize(v.name));
+            .replace("{nom}", &sanitize(&crate::naming::clean_name(v.name)));
         path.push(rendered);
     }
     if path.extension().map(|e| !e.eq_ignore_ascii_case("gpx")).unwrap_or(true) {
@@ -321,7 +324,7 @@ pub fn import_files(index: &mut Index, library: &Library, files: &[String], now:
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs() as i64)
             .unwrap_or(now);
-        let sport = sport_from_type(analysis.sport_type.as_deref());
+        let sport = sport_for(analysis.sport_type.as_deref(), &analysis.name);
         let source = scan::source_of(&analysis);
         let vars = PathVars {
             name: &analysis.name,

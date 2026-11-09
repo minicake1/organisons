@@ -7,13 +7,6 @@ export const HILLINESS: Record<Hilliness, string> = {
   MOUNTAINOUS: 'Montagneux',
 }
 
-export const SURFACES: Record<string, string> = {
-  ROAD: 'Route',
-  GRAVEL: 'Gravel',
-  MTB: 'VTT',
-  MIXED: 'Mixte',
-}
-
 export const WINDS: { value: Wind; label: string; angle: number }[] = [
   { value: 'N', label: 'Nord', angle: 0 },
   { value: 'NE', label: 'Nord-Est', angle: 45 },
@@ -65,3 +58,14 @@ export const SURFACE_CLASSES: { value: SurfaceClass; label: string; color: strin
   { value: 'unknown', label: 'Inconnu', color: '#ced4da' },
 ]
 export const surfaceColor = (c: SurfaceClass) => SURFACE_CLASSES.find((s) => s.value === c)?.color ?? '#ced4da'
+
+/** Couleur de chaque sport (badges des tuiles, de la liste et de la fiche). */
+export const SPORT_COLORS: Record<string, { bg: string; fg: string }> = {
+  Route: { bg: '#1c7ed6', fg: '#fff' },
+  Gravel: { bg: '#2b8a3e', fg: '#fff' },
+  VTT: { bg: '#8d5524', fg: '#fff' },
+  Vélo: { bg: '#7048e8', fg: '#fff' },
+  Randonnée: { bg: '#fcc419', fg: '#212529' },
+  'Course à pied': { bg: '#e8590c', fg: '#fff' },
+}
+export const sportColor = (sport: string) => SPORT_COLORS[sport] ?? { bg: '#868e96', fg: '#fff' }

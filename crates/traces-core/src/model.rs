@@ -192,6 +192,8 @@ pub struct TraceAnalysis {
     pub sport_type: Option<String>,
     /// Date du parcours (secondes Unix) : `<metadata><time>` ou premier point horodaté.
     pub date: Option<i64>,
+    /// Identifiant de parcours retiré du titre (Openrunner : « …-15424659 »), gardé dans les notes.
+    pub route_id: Option<String>,
     pub profile: Vec<ProfilePoint>,
     pub pois: Vec<Poi>,
 }
@@ -307,6 +309,8 @@ pub struct TraceFilter {
     pub elevation_max: Option<f64>,
     pub hilliness: Option<Hilliness>,
     pub surface_type: Option<String>,
+    /// Sport (celui choisi sur la fiche, sinon celui lu dans le GPX).
+    pub sport: Option<String>,
     pub wind: Option<WindDirection>,
     /// Inclure les directions voisines (±45°).
     pub wind_near: bool,

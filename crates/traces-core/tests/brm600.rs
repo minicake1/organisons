@@ -120,7 +120,10 @@ fn tags_ecrits_dans_le_gpx_openrunner() {
     scan_library(&mut fresh, &lib2, 3_000).unwrap();
     let t = fresh.get(fresh.list(&TraceFilter::default()).unwrap()[0].id).unwrap();
     assert_eq!(t.summary.tags, vec!["Brevet".to_string(), "Manche & côte".to_string()]);
-    assert_eq!(t.notes, "Contrôle secret <à vérifier>");
+    // Nouvelle trace dans cet index : l’identifiant Openrunner retiré du nom est ajouté aux notes.
+    assert_eq!(t.notes, "Contrôle secret <à vérifier>
+Openrunner : https://www.openrunner.com/route-details/24118757");
+    assert_eq!(t.summary.name, "BRM 600 Tour de Manche");
 
     // Bibliothèque sans autorisation d'écriture : le fichier n'est pas touché.
     let before = std::fs::read(&file).unwrap();
@@ -147,8 +150,9 @@ fn rangement_et_import() {
     // Aperçu : deux traces au même nom → la seconde est numérotée.
     let moves = organize::plan(&idx, &lib).unwrap();
     assert_eq!(moves.len(), 2, "{moves:?}");
-    let base = root.join("Vélo").join("2026");
-    let name = "BRM 600 _ Tour de Manche 2027-24118757";
+    // Année lue dans le titre (« … 2027-24118757 »), nom nettoyé (sans « _ », date ni identifiant Openrunner).
+    let base = root.join("Vélo").join("2027");
+    let name = "BRM 600 Tour de Manche";
     assert!(moves.iter().all(|m| m.to.starts_with(&*base.to_string_lossy())), "{moves:?}");
     assert!(moves.iter().any(|m| m.to.ends_with(&format!("{name}.gpx"))), "{moves:?}");
     assert!(moves.iter().any(|m| m.to.ends_with(&format!("{name} (2).gpx"))), "{moves:?}");

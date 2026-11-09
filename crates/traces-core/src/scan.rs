@@ -79,11 +79,24 @@ pub(crate) fn index_file(index: &mut Index, library: &Library, path: &Path, key:
     }
     let analysis = analyze_file(path)?;
     let source = source_of(&analysis);
+    // Nom connu avant cette lecture (encore avec l'identifiant si la trace date d'avant le nettoyage des noms).
+    let old_name = previous.as_ref().and_then(|p| index.get(p.id).ok()).map(|t| t.summary.name);
     let (id, added) = index.upsert_trace(library.id, key, &hash, size, mtime, source, now, &analysis)?;
     // Tags et notes déjà écrits dans le GPX par Organisons : le fichier fait foi.
     if let Some(meta) = read_meta_file(path) {
         index.set_tags(id, &meta.tags)?;
         index.set_notes(id, &meta.notes)?;
+    }
+    // Identifiant retiré du nom (Openrunner) : ajouté aux notes la première fois
+    // seulement (nouvelle trace, ou nom pas encore nettoyé), pour qu'on puisse l'effacer ensuite.
+    if let Some(rid) = &analysis.route_id {
+        let first_time = added || old_name.is_some_and(|n| n.contains(rid.as_str()));
+        let notes = index.get(id)?.notes;
+        if first_time && !notes.contains(rid.as_str()) {
+            let line = crate::naming::route_id_note(rid, analysis.creator.as_deref());
+            let notes = if notes.trim().is_empty() { line } else { format!("{}\n{line}", notes.trim_end()) };
+            index.set_notes(id, &notes)?;
+        }
     }
     Ok(if added { Outcome::Added } else { Outcome::Updated })
 }

@@ -3,6 +3,7 @@ import {
   ActionIcon,
   Anchor,
   Badge,
+  Box,
   Button,
   Card,
   Checkbox,
@@ -35,7 +36,8 @@ import {
   IconSearch,
 } from '@tabler/icons-react'
 import { api, type Collection, type Hilliness, type Library, type SortKey, type TraceFilter, type TraceSummary, type Wind } from '../api'
-import { HILLINESS, SURFACES, WINDS, date, int, km1, windLabel, windShort } from '../labels'
+import { HILLINESS, WINDS, date, int, km1, windLabel, windShort } from '../labels'
+import SportBadge from '../components/SportBadge'
 import TrackThumb from '../components/TrackThumb'
 import ManagedActions from '../components/ManagedActions'
 import WindArrow from '../components/WindArrow'
@@ -59,6 +61,10 @@ export default function LibraryPage({
   const [traces, setTraces] = useState<TraceSummary[]>([])
   const [libraries, setLibraries] = useState<Library[]>([])
   const [tags, setTags] = useState<string[]>([])
+  const [sports, setSports] = useState<string[]>([])
+  useEffect(() => {
+    api.sports().then(setSports).catch(() => {})
+  }, [])
   const [open, setOpen] = useState(true)
   const [view, setView] = useState<View>('grid')
   const [selected, setSelected] = useState<number | null>(null)
@@ -83,7 +89,7 @@ export default function LibraryPage({
   const set = <K extends keyof TraceFilter>(k: K, v: TraceFilter[K]) => setFilter((f) => ({ ...f, [k]: v ?? undefined }))
   const activeCount = useMemo(
     () =>
-      [filter.query, filter.hilliness, filter.surfaceType, filter.wind, filter.source, filter.tag, filter.collection].filter(Boolean).length +
+      [filter.query, filter.hilliness, filter.sport, filter.wind, filter.source, filter.tag, filter.collection].filter(Boolean).length +
       (filter.distanceMin != null || filter.distanceMax != null ? 1 : 0) +
       (filter.elevationMin != null || filter.elevationMax != null ? 1 : 0),
     [filter],
@@ -200,12 +206,12 @@ export default function LibraryPage({
                 onChange={(v) => set('hilliness', (v as Hilliness) ?? undefined)}
               />
               <Select
-                label="Type de revêtement"
-                placeholder="Tous les types"
+                label="Sport"
+                placeholder="Tous les sports"
                 clearable
-                data={Object.entries(SURFACES).map(([value, label]) => ({ value, label }))}
-                value={filter.surfaceType ?? null}
-                onChange={(v) => set('surfaceType', v ?? undefined)}
+                data={sports}
+                value={filter.sport ?? null}
+                onChange={(v) => set('sport', v ?? undefined)}
               />
               <Stack gap={4}>
                 <Select
@@ -299,7 +305,9 @@ export default function LibraryPage({
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 3, xl: 4 }}>
           {traces.map((t) => (
             <Card key={t.id} withBorder padding={0} radius="md" component="button" onClick={() => onOpen(t.id)} style={{ textAlign: 'left', cursor: 'pointer' }}>
-              <TrackThumb id={t.id} preview={t.preview} />
+              <Box style={{ position: "relative" }}>
+                <TrackThumb id={t.id} preview={t.preview} />
+              </Box>
               <Stack gap={8} p="md">
                 <Text fw={700} lineClamp={1}>
                   {t.name}
@@ -334,9 +342,12 @@ export default function LibraryPage({
                   >
                     <div style={{ width: 6, borderRadius: 3, background: on ? '#4263eb' : '#ced4da', flex: 'none' }} />
                     <Stack gap={6} style={{ flex: 1, minWidth: 0 }}>
-                      <Text fw={600} size="sm" lineClamp={1}>
+                      <Group gap={8} wrap="nowrap">
+                        <SportBadge sport={t.sport} size="xs" style={{ flex: "none" }} />
+                        <Text fw={600} size="sm" lineClamp={1}>
                         {t.name}
-                      </Text>
+                        </Text>
+                      </Group>
                       <Group gap="md">
                         <TraceFigures t={t} />
                         <Text size="xs" c="dimmed" ml="auto">
@@ -386,7 +397,7 @@ export default function LibraryPage({
                   <Table.Th>Distance</Table.Th>
                   <Table.Th>D+</Table.Th>
                   <Table.Th>Relief</Table.Th>
-                  <Table.Th>Revêtement</Table.Th>
+                  <Table.Th>Sport</Table.Th>
                   <Table.Th>Vent idéal</Table.Th>
                   <Table.Th>Tags</Table.Th>
                   <Table.Th>Ajout</Table.Th>
@@ -399,7 +410,9 @@ export default function LibraryPage({
                     <Table.Td>{km1(t.distanceKm)} km</Table.Td>
                     <Table.Td>{int(t.elevationGain)} m</Table.Td>
                     <Table.Td>{HILLINESS[t.hilliness]}</Table.Td>
-                    <Table.Td>{t.surfaceType ? SURFACES[t.surfaceType] : '—'}</Table.Td>
+                    <Table.Td>
+                      <SportBadge sport={t.sport} size="sm" />
+                    </Table.Td>
                     <Table.Td c="blue.8">
                       <Group gap={4}>
                         <WindArrow wind={t.wind} />
@@ -463,14 +476,10 @@ function TraceFigures({ t }: { t: TraceSummary }) {
   )
 }
 
-function TraceBadges({ t }: { t: TraceSummary }) {
+function TraceBadges({ t, sport = true }: { t: TraceSummary; sport?: boolean }) {
   return (
     <Group gap={6}>
-      {t.surfaceType && (
-        <Badge variant="light" color="gray">
-          {SURFACES[t.surfaceType]}
-        </Badge>
-      )}
+      {sport && <SportBadge sport={t.sport} />}
       <Badge variant="light" color="orange">
         {HILLINESS[t.hilliness]}
       </Badge>
