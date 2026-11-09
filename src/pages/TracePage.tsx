@@ -7,10 +7,10 @@ import {
   Checkbox,
   Chip,
   Code,
+  Collapse,
   Group,
   Loader,
   Paper,
-  ScrollArea,
   SegmentedControl,
   Select,
   SimpleGrid,
@@ -21,10 +21,11 @@ import {
   Title,
   Tooltip,
 } from '@mantine/core'
-import { IconArrowLeft, IconDeviceWatch, IconFolderOpen } from '@tabler/icons-react'
+import { IconArrowLeft, IconCheck, IconChevronDown, IconDeviceWatch, IconFolderOpen, IconPencil } from '@tabler/icons-react'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
 import { api, type Collection, type Poi, type PoiKind, type TraceDetail } from '../api'
-import { HILLINESS, POI_KINDS, SURFACES, int, km1, poiKind, windLabel } from '../labels'
+import { HILLINESS, POI_KINDS, SURFACES, SURFACE_CLASSES, int, km1, poiKind, slopeColor, surfaceColor, windLabel } from '../labels'
+import { computeSurface } from '../osmSurface'
 import ElevationProfile from '../components/ElevationProfile'
 import TraceMap from '../components/TraceMap'
 import WindArrow from '../components/WindArrow'
@@ -42,6 +43,10 @@ export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: {
   const [collections, setCollections] = useState<Collection[]>([])
   const [saveError, setSaveError] = useState<string | null>(null)
   const [poiOrder, setPoiOrder] = useState<'km' | 'kind'>('kind')
+  const [folded, setFolded] = useState<Partial<Record<PoiKind, boolean>>>({})
+  const [editing, setEditing] = useState(false)
+  // Partie de la trace visible sur la carte : le profil suit le zoom.
+  const [range, setRange] = useState<[number, number] | null>(null)
 
   useEffect(() => {
     api.getTrace(id).then(setT).catch((e) => setError(String(e)))
@@ -59,6 +64,38 @@ export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: {
   const kindOn = (k: PoiKind) => kinds[k] ?? poiKind(k).byDefault
   const checked = (i: number) => picks[i] ?? (t ? kindOn(t.pois[i].kind) : false)
   const visiblePois = useMemo(() => (t && mapPois ? t.pois.filter((_, i) => checked(i)) : []), [t, mapPois, kinds, picks]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Couleur de chaque tronçon : pente, ou revêtement OSM (gris tant qu’il n’est pas calculé).
+  const colors = useMemo(() => {
+    if (!t) return []
+    if (mode === "slope") return t.profile.map((p) => slopeColor(p.slopeMax))
+    const runs = t.surface ?? []
+    let j = 0
+    return t.profile.map((p) => {
+      while (j < runs.length - 1 && runs[j].toKm < p.km) j++
+      return runs.length ? surfaceColor(runs[j].class) : "#ced4da"
+    })
+  }, [t?.profile, t?.surface, mode]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Légende survolée : ce type (pente ou revêtement) ressort, le reste s’efface.
+  const [hl, setHl] = useState<string | null>(null)
+  const shownColors = useMemo(() => (hl ? colors.map((c) => (c === hl ? c : fade(c, 0.5))) : colors), [colors, hl])
+  // Sur la carte, atténuation plus légère : la trace doit rester lisible sur le fond.
+  const mapColors = useMemo(() => (hl ? colors.map((c) => (c === hl ? c : fade(c, 0.45))) : colors), [colors, hl])
+  const legendItem = (color: string) => ({
+    onMouseEnter: () => setHl(color),
+    onMouseLeave: () => setHl(null),
+    style: { cursor: "default", padding: "2px 6px", margin: "-2px -6px", borderRadius: 6, background: hl === color ? "#f1f3f5" : undefined },
+  })
+  const [surfaceBusy, setSurfaceBusy] = useState<string | null>(null)
+  const [surfaceError, setSurfaceError] = useState<string | null>(null)
+  const runSurface = () => {
+    if (!t) return
+    setSurfaceError(null)
+    setSurfaceBusy("Lecture des tuiles OpenStreetMap…")
+    computeSurface(t.id, t.profile, (done, total) => setSurfaceBusy(`Tuiles OpenStreetMap : ${done}/${total}`))
+      .then((surface) => setT((cur) => (cur ? { ...cur, surface } : cur)))
+      .catch((e) => setSurfaceError(String(e instanceof Error ? e.message : e)))
+      .finally(() => setSurfaceBusy(null))
+  }
 
   if (error) return <Text c="red">{error}</Text>
   if (!t) return <Loader />
@@ -97,7 +134,8 @@ export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: {
   )
 
   return (
-    <Stack gap="md">
+    // Hauteur de la fenêtre : carte et profil visibles ensemble, seul le panneau de droite défile.
+    <Stack gap="md" h="calc(100dvh - 2 * var(--mantine-spacing-lg))" style={{ overflow: 'hidden' }}>
       <Group gap="xs">
         <Button variant="subtle" leftSection={<IconArrowLeft size={16} />} onClick={onBack} px={6}>
           {backLabel}
@@ -122,11 +160,11 @@ export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: {
         </Group>
       </Group>
 
-      <Group align="flex-start" gap="md" wrap="wrap">
-        <Stack gap="md" style={{ flex: '2 1 560px', minWidth: 0 }}>
-          <Paper withBorder radius="md" style={{ overflow: 'hidden' }}>
-            <Box style={{ position: 'relative', aspectRatio: '800 / 420' }}>
-              <TraceMap profile={t.profile} pois={visiblePois} cursor={cursor} colorBySlope={mode === 'slope'} />
+      <Group align="stretch" gap="md" wrap="nowrap" style={{ flex: 1, minHeight: 0 }}>
+        <Stack gap="md" style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
+          <Paper withBorder radius="md" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+            <Box style={{ position: 'relative', flex: 1, minHeight: 200 }}>
+              <TraceMap profile={t.profile} pois={visiblePois} cursor={cursor} colors={mapColors} onView={setRange} />
             </Box>
             <Stack gap="sm" p="md">
               <Group>
@@ -139,27 +177,74 @@ export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: {
                   onChange={(v) => setMode(v as 'slope' | 'surface')}
                   data={[
                     { value: 'slope', label: 'Pente' },
-                    { value: 'surface', label: 'Revêtement', disabled: true },
+                    { value: 'surface', label: 'Revêtement' },
                   ]}
                 />
               </Group>
-              <ElevationProfile profile={t.profile} pois={visiblePois} cursor={cursor} onCursor={setCursor} />
-              <Group gap="md" wrap="wrap">
-                {[
-                  ['#c0eb75', '0–3 %'],
-                  ['#ffd43b', '3–6 %'],
-                  ['#ff922b', '6–9 %'],
-                  ['#f03e3e', '> 9 %'],
-                ].map(([c, l]) => (
-                  <Group key={l} gap={6}>
-                    <Box w={12} h={12} style={{ borderRadius: 3, background: c }} />
-                    <Text size="xs">{l}</Text>
-                  </Group>
-                ))}
-                <Text size="xs" c="dimmed" ml="auto">
-                  Revêtement : calculé depuis OpenStreetMap dans une prochaine version
-                </Text>
-              </Group>
+              <ElevationProfile
+                profile={t.profile}
+                pois={visiblePois}
+                cursor={cursor}
+                onCursor={setCursor}
+                colors={shownColors}
+                range={range}
+                height="clamp(130px, 20vh, 220px)"
+              />
+              {mode === 'slope' ? (
+                <Group gap="md" wrap="wrap">
+                  {[
+                    ['#c0eb75', '0–3 %'],
+                    ['#ffd43b', '3–6 %'],
+                    ['#ff922b', '6–9 %'],
+                    ['#f03e3e', '> 9 %'],
+                  ].map(([c, l]) => (
+                    <Group key={l} gap={6} {...legendItem(c)}>
+                      <Box w={12} h={12} style={{ borderRadius: 3, background: c }} />
+                      <Text size="xs">{l}</Text>
+                    </Group>
+                  ))}
+                </Group>
+              ) : (
+                <Group gap="md" wrap="wrap">
+                  {t.surface ? (
+                    SURFACE_CLASSES.map((s) => {
+                      const km = t.surface!.filter((r) => r.class === s.value).reduce((a, r) => a + r.toKm - r.fromKm, 0)
+                      if (km <= 0) return null
+                      return (
+                        <Group key={s.value} gap={6} {...legendItem(s.color)}>
+                          <Box w={12} h={12} style={{ borderRadius: 3, background: s.color }} />
+                          <Text size="xs">
+                            {s.label} · {km1(km)} km ({int((km / (t.distanceKm || 1)) * 100)} %)
+                          </Text>
+                        </Group>
+                      )
+                    })
+                  ) : (
+                    <Text size="xs" c="dimmed">
+                      Le revêtement n’a pas encore été calculé pour cette trace.
+                    </Text>
+                  )}
+                  <Button
+                    size="compact-xs"
+                    variant={t.surface ? 'subtle' : 'filled'}
+                    ml="auto"
+                    loading={surfaceBusy != null}
+                    onClick={runSurface}
+                  >
+                    {t.surface ? 'Recalculer' : 'Calculer depuis OpenStreetMap'}
+                  </Button>
+                  {surfaceBusy && (
+                    <Text size="xs" c="dimmed">
+                      {surfaceBusy}
+                    </Text>
+                  )}
+                  {surfaceError && (
+                    <Text size="xs" c="red" w="100%">
+                      {surfaceError}
+                    </Text>
+                  )}
+                </Group>
+              )}
               {counts.length > 0 && (
                 <Group gap={6}>
                   <Text size="xs" fw={600} c="dimmed">
@@ -183,10 +268,22 @@ export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: {
           </Paper>
         </Stack>
 
-        <Stack gap="md" style={{ flex: '1 1 300px', minWidth: 0 }}>
+        <Stack gap="md" style={{ width: 380, flexShrink: 0, overflowY: 'auto', paddingRight: 4 }}>
           <Paper withBorder radius="md" p="md">
             <Stack gap="sm">
-              <Text fw={600}>Classement</Text>
+              <Group justify="space-between">
+                <Text fw={600}>Classement</Text>
+                <Button
+                  size="compact-sm"
+                  variant={editing ? "filled" : "default"}
+                  leftSection={editing ? <IconCheck size={14} /> : <IconPencil size={14} />}
+                  onClick={() => setEditing((v) => !v)}
+                >
+                  {editing ? "Terminé" : "Modifier"}
+                </Button>
+              </Group>
+              {editing ? (
+              <>
               <Select
                 label="Sport"
                 description="Sert au rangement des bibliothèques gérées. Effacer pour revenir au type lu dans le GPX."
@@ -266,6 +363,15 @@ export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: {
                   {saveError}
                 </Text>
               )}
+              </>
+              ) : (
+                <ClassementView t={t} collections={collections} />
+              )}
+              {saveError && !editing && (
+                <Text size="xs" c="red">
+                  {saveError}
+                </Text>
+              )}
               <Group gap="md">
                 <Text size="sm">Relief : {HILLINESS[t.hilliness]}</Text>
                 <Group gap={4} c="blue.8">
@@ -312,7 +418,7 @@ export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: {
                       { value: 'kind', label: 'Par catégorie' },
                     ]}
                   />
-                  <ScrollArea.Autosize mah={420}>
+                  <Box>
                     <Stack gap={0}>
                       {poiOrder === 'km'
                         ? t.pois.map((p, i) => poiRow(p, i))
@@ -342,19 +448,43 @@ export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: {
                                     }}
                                     aria-label={`Afficher tous les POI ${k.label}`}
                                   />
-                                  <Text size="sm" fw={700} c="white" style={{ flex: 1 }}>
-                                    {k.label}
-                                  </Text>
-                                  <Text size="xs" c="white" opacity={0.85}>
-                                    {on}/{idx.length}
-                                  </Text>
+                                  {/* Clic sur l'en-tête : replier ou déplier la catégorie. */}
+                                  <Group
+                                    gap={8}
+                                    wrap="nowrap"
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-expanded={!folded[k.kind]}
+                                    style={{ flex: 1, cursor: 'pointer', userSelect: 'none' }}
+                                    onClick={() => setFolded((s) => ({ ...s, [k.kind]: !s[k.kind] }))}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault()
+                                        setFolded((s) => ({ ...s, [k.kind]: !s[k.kind] }))
+                                      }
+                                    }}
+                                  >
+                                    <Text size="sm" fw={700} c="white" style={{ flex: 1 }}>
+                                      {k.label}
+                                    </Text>
+                                    <Text size="xs" c="white" opacity={0.85}>
+                                      {on}/{idx.length}
+                                    </Text>
+                                    <IconChevronDown
+                                      size={16}
+                                      color="white"
+                                      style={{ transition: 'transform 0.15s', transform: folded[k.kind] ? 'rotate(-90deg)' : 'none' }}
+                                    />
+                                  </Group>
                                 </Group>
-                                <Box pl={4}>{idx.map((i) => poiRow(t.pois[i], i))}</Box>
+                                <Collapse in={!folded[k.kind]} transitionDuration={150}>
+                                  <Box pl={4}>{idx.map((i) => poiRow(t.pois[i], i))}</Box>
+                                </Collapse>
                               </Box>
                             )
                           })}
                     </Stack>
-                  </ScrollArea.Autosize>
+                  </Box>
                 </>
               )}
             </Stack>
@@ -390,4 +520,70 @@ function Stat({ value, label }: { value: string; label: string }) {
       </Text>
     </div>
   )
+}
+
+/** Classement en lecture seule (le bouton « Modifier » passe en édition). */
+function ClassementView({ t, collections }: { t: TraceDetail; collections: Collection[] }) {
+  const cols = t.collectionIds.map((id) => collections.find((c) => c.id === id)?.name).filter((n): n is string => !!n)
+  const row = (label: string, value: React.ReactNode) => (
+    <Group gap="xs" wrap="nowrap" align="flex-start">
+      <Text size="sm" c="dimmed" w={96} style={{ flex: 'none' }}>
+        {label}
+      </Text>
+      <Box style={{ flex: 1, minWidth: 0 }}>{value}</Box>
+    </Group>
+  )
+  const none = (
+    <Text size="sm" c="dimmed" fs="italic">
+      Aucun
+    </Text>
+  )
+  return (
+    <Stack gap={8}>
+      {row('Sport', <Text size="sm">{t.sport}</Text>)}
+      {row('Revêtement', t.surfaceType ? <Text size="sm">{SURFACES[t.surfaceType] ?? t.surfaceType}</Text> : none)}
+      {row(
+        'Tags',
+        t.tags.length ? (
+          <Group gap={4}>
+            {t.tags.map((tag) => (
+              <Badge key={tag} variant="light" color="gray" tt="none">
+                {tag}
+              </Badge>
+            ))}
+          </Group>
+        ) : (
+          none
+        ),
+      )}
+      {row(
+        'Collections',
+        cols.length ? (
+          <Group gap={4}>
+            {cols.map((c) => (
+              <Badge key={c} variant="light" color="blue" tt="none">
+                {c}
+              </Badge>
+            ))}
+          </Group>
+        ) : (
+          none
+        ),
+      )}
+      {t.notes.trim() &&
+        row(
+          'Notes',
+          <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
+            {t.notes}
+          </Text>,
+        )}
+    </Stack>
+  )
+}
+
+/** Couleur atténuée (mélangée à du blanc, 75 % par défaut ; 50 % sur le profil, 45 % sur la carte) : les autres types restent reconnaissables. */
+function fade(hex: string, amount = 0.75): string {
+  const n = parseInt(hex.slice(1), 16)
+  const mix = (v: number) => Math.round(v + (255 - v) * amount)
+  return `rgb(${mix((n >> 16) & 255)}, ${mix((n >> 8) & 255)}, ${mix(n & 255)})`
 }

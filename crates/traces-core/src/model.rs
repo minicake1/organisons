@@ -234,6 +234,8 @@ pub struct TraceDetail {
     /// Collections dont fait partie la trace.
     pub collection_ids: Vec<i64>,
     pub profile: Vec<ProfilePoint>,
+    /// Revêtement calculé depuis OpenStreetMap (absent tant qu'il n'a pas été demandé).
+    pub surface: Option<Vec<crate::surface::SurfaceRun>>,
     pub pois: Vec<Poi>,
 }
 

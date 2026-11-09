@@ -70,6 +70,14 @@ export interface Poi {
   symbol: string | null
 }
 
+export type SurfaceClass = 'paved' | 'cobbles' | 'gravel' | 'unpaved' | 'unknown'
+
+export interface SurfaceRun {
+  fromKm: number
+  toKm: number
+  class: SurfaceClass
+}
+
 export interface TraceDetail extends TraceSummary {
   elevationLoss: number
   eleMin: number
@@ -79,6 +87,8 @@ export interface TraceDetail extends TraceSummary {
   creator: string | null
   collectionIds: number[]
   profile: ProfilePoint[]
+  /** Revêtement calculé depuis OpenStreetMap (null tant qu’il n’a pas été demandé). */
+  surface: SurfaceRun[] | null
   pois: Poi[]
 }
 
@@ -146,6 +156,8 @@ export const api = {
   applyOrganize: (libraryId: number, moves: PlannedMove[]) => invoke<OrganizeReport>('apply_organize', { libraryId, moves }),
   importFiles: (libraryId: number, files: string[]) => invoke<OrganizeReport>('import_files', { libraryId, files }),
   setSport: (id: number, sport: string | null) => invoke<void>('set_sport', { id, sport }),
+  setSurface: (id: number, ways: { tags: Record<string, string>; geometry: [number, number][] }[]) =>
+    invoke<SurfaceRun[]>('set_surface', { id, ways }),
   sports: () => invoke<string[]>('sports'),
   scanAll: () => invoke<ScanReport>('scan_all'),
   listTraces: (filter: TraceFilter) => invoke<TraceSummary[]>('list_traces', { filter }),

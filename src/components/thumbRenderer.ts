@@ -5,13 +5,15 @@
 import maplibregl from 'maplibre-gl'
 import { MAP_STYLE } from './useMapLibre'
 
-/** Taille affichée de la vignette (rendue en ×2 pour la netteté). */
+/** Taille par défaut ; chaque vignette est rendue à sa taille affichée (×2 pour la netteté). */
 export const THUMB_W = 300
 export const THUMB_H = 180
 
 type Job = {
   key: string
   coords: [number, number][]
+  w: number
+  h: number
   cancelled: boolean
   resolve: (url: string) => void
   reject: (e: unknown) => void
@@ -21,13 +23,14 @@ const cache = new Map<string, string>()
 const queue: Job[] = []
 let mapPromise: Promise<maplibregl.Map> | null = null
 let running = false
+let container: HTMLDivElement | null = null
 
 const EMPTY: GeoJSON.Feature<GeoJSON.LineString> = { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [] } }
 
 function getMap(): Promise<maplibregl.Map> {
   if (mapPromise) return mapPromise
   mapPromise = new Promise((resolve, reject) => {
-    const el = document.createElement('div')
+    const el = (container = document.createElement('div'))
     el.setAttribute('aria-hidden', 'true')
     el.style.cssText = `position:fixed;left:-10000px;top:0;width:${THUMB_W}px;height:${THUMB_H}px;pointer-events:none;`
     document.body.appendChild(el)
@@ -45,6 +48,7 @@ function getMap(): Promise<maplibregl.Map> {
       if (loaded) return
       m.remove()
       el.remove()
+      container = null
       mapPromise = null
       reject(e)
     }
@@ -86,6 +90,12 @@ async function pump() {
       if (job.cancelled) continue
       try {
         const m = await getMap()
+        // Même cadre que la vignette affichée, sinon l'image recadrée paraît trop zoomée.
+        if (container && (container.clientWidth !== job.w || container.clientHeight !== job.h)) {
+          container.style.width = `${job.w}px`
+          container.style.height = `${job.h}px`
+          m.resize()
+        }
         ;(m.getSource('t') as maplibregl.GeoJSONSource).setData({ ...EMPTY, geometry: { type: 'LineString', coordinates: job.coords } })
         const b = new maplibregl.LngLatBounds(job.coords[0], job.coords[0])
         job.coords.forEach((c) => b.extend(c))
@@ -110,13 +120,16 @@ async function pump() {
  * Renvoie l'image tout de suite si elle est en cache, sinon une promesse et
  * une fonction d'annulation (vignette sortie de l'écran).
  */
-export function requestThumb(key: string, preview: [number, number][]): { cached?: string; promise?: Promise<string>; cancel: () => void } {
+export function requestThumb(key: string, preview: [number, number][], w = THUMB_W, h = THUMB_H): { cached?: string; promise?: Promise<string>; cancel: () => void } {
+  w = Math.max(80, Math.min(800, Math.round(w)))
+  h = Math.max(60, Math.min(500, Math.round(h)))
+  key = `${key}@${w}x${h}`
   const hit = cache.get(key)
   if (hit) return { cached: hit, cancel: () => {} }
   if (preview.length < 2) return { cancel: () => {} }
   let job!: Job
   const promise = new Promise<string>((resolve, reject) => {
-    job = { key, coords: preview.map(([lat, lon]) => [lon, lat]), cancelled: false, resolve, reject }
+    job = { key, coords: preview.map(([lat, lon]) => [lon, lat]), w, h, cancelled: false, resolve, reject }
   })
   queue.push(job)
   pump()

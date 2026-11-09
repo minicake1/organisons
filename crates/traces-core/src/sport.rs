@@ -8,14 +8,15 @@ pub const DEFAULT_SPORT: &str = "Vélo";
 
 /// Traduit le `<type>` d'un GPX (Komoot, Garmin, Openrunner…) en dossier français.
 ///
-/// Exemples : `racebike` → Route, `gravel_cycling` → Gravel, `mtb_easy` → VTT,
+/// Exemples : `racebike` → Route, `gravel_cycling` ou `mtb_easy` (Komoot) → Gravel, `mtb` → VTT,
 /// `hike` → Randonnée, `jogging` → Course à pied. Inconnu ou absent → Vélo.
 pub fn sport_from_type(gpx_type: Option<&str>) -> &'static str {
     let Some(t) = gpx_type.map(str::to_lowercase) else {
         return DEFAULT_SPORT;
     };
     let has = |words: &[&str]| words.iter().any(|w| t.contains(w));
-    if has(&["gravel"]) {
+    // Chez Komoot, `mtb_easy` est le sport « Gravel » (le VTT est `mtb`, l’enduro `mtb_advanced`).
+    if has(&["gravel", "mtb_easy"]) {
         "Gravel"
     } else if has(&["mtb", "mountain", "vtt", "enduro", "downhill"]) {
         "VTT"
@@ -41,7 +42,9 @@ mod tests {
         assert_eq!(sport_from_type(Some("road_biking")), "Route");
         assert_eq!(sport_from_type(Some("touringbicycle")), "Route");
         assert_eq!(sport_from_type(Some("gravel_cycling")), "Gravel");
-        assert_eq!(sport_from_type(Some("mtb_easy")), "VTT");
+        assert_eq!(sport_from_type(Some("mtb_easy")), "Gravel");
+        assert_eq!(sport_from_type(Some("mtb")), "VTT");
+        assert_eq!(sport_from_type(Some("mtb_advanced")), "VTT");
         assert_eq!(sport_from_type(Some("mountain_biking")), "VTT");
         assert_eq!(sport_from_type(Some("hike")), "Randonnée");
         assert_eq!(sport_from_type(Some("jogging")), "Course à pied");

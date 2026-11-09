@@ -6,7 +6,7 @@ const toLngLat = (p: [number, number][]) => p.map(([lat, lon]) => [lon, lat] as 
 
 /** Carte centrée sur une seule trace (affichage « liste + carte »). */
 export function SelectedTraceMap({ trace }: { trace: TraceSummary | null }) {
-  const { container, map } = useMapLibre()
+  const { container, map, fitTo } = useMapLibre()
   useEffect(() => {
     if (!map) return
     const coords = trace ? toLngLat(trace.preview) : []
@@ -17,7 +17,7 @@ export function SelectedTraceMap({ trace }: { trace: TraceSummary | null }) {
     }
     const b = boundsOf(coords)
     // Marge basse pour laisser la place à l'encadré de résumé.
-    if (b) map.fitBounds(b, { padding: { top: 40, left: 40, right: 60, bottom: 150 }, duration: 600 })
+    if (b) fitTo(b, { padding: { top: 40, left: 40, right: 60, bottom: 150 }, duration: 600 })
   }, [map, trace])
   return <div ref={container} style={{ position: 'absolute', inset: 0 }} />
 }
@@ -26,7 +26,7 @@ const SURFACE_COLORS: Record<string, string> = { ROAD: '#4263eb', GRAVEL: '#e859
 
 /** Toutes les traces filtrées sur une même carte (affichage « carte »). */
 export function AllTracesMap({ traces, onOpen }: { traces: TraceSummary[]; onOpen: (id: number) => void }) {
-  const { container, map } = useMapLibre()
+  const { container, map, fitTo } = useMapLibre()
   useEffect(() => {
     if (!map) return
     const fc: GeoJSON.FeatureCollection = {
@@ -44,7 +44,7 @@ export function AllTracesMap({ traces, onOpen }: { traces: TraceSummary[]; onOpe
       map.on('mouseleave', 'all-line', () => (map.getCanvas().style.cursor = ''))
     }
     const b = boundsOf(traces.flatMap((t) => toLngLat(t.preview)))
-    if (b) map.fitBounds(b, { padding: 40, duration: 0 })
+    if (b) fitTo(b, { padding: 40, duration: 0 })
   }, [map, traces, onOpen])
   return <div ref={container} style={{ position: 'absolute', inset: 0 }} />
 }

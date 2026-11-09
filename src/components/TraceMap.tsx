@@ -1,14 +1,17 @@
 import { useEffect, useRef } from 'react'
 import maplibregl from 'maplibre-gl'
 import type { Poi, ProfilePoint } from '../api'
-import { int, km1, niceStep, poiKind, slopeColor } from '../labels'
+import { int, km1, niceStep, poiKind } from '../labels'
 import { boundsOf, line, setGeoJson, useMapLibre } from './useMapLibre'
 
 interface Props {
   profile: ProfilePoint[]
   pois: Poi[]
   cursor: number | null
-  colorBySlope: boolean
+  /** Couleur de chaque tronçon (pente ou revêtement). */
+  colors: string[]
+  /** Partie de la trace visible sur la carte (km), ou null si elle est entière. */
+  onView?: (range: [number, number] | null) => void
 }
 
 const ll = (p: ProfilePoint) => [p.lon, p.lat] as [number, number]
@@ -16,8 +19,8 @@ const ll = (p: ProfilePoint) => [p.lon, p.lat] as [number, number]
 /** En dessous de ce zoom, les noms des POI se chevauchent : on n'affiche que les pastilles. */
 const POI_LABEL_MIN_ZOOM = 11
 
-export default function TraceMap({ profile, pois, cursor, colorBySlope }: Props) {
-  const { container, map } = useMapLibre()
+export default function TraceMap({ profile, pois, cursor, colors, onView }: Props) {
+  const { container, map, fitTo } = useMapLibre()
   const markers = useRef<maplibregl.Marker[]>([])
   const poiMarkers = useRef<maplibregl.Marker[]>([])
   const total = profile[profile.length - 1]?.km ?? 0
@@ -31,7 +34,7 @@ export default function TraceMap({ profile, pois, cursor, colorBySlope }: Props)
     const segs: GeoJSON.Feature<GeoJSON.LineString>[] = []
     let cur: { color: string; coords: [number, number][] } | null = null
     profile.forEach((p, i) => {
-      const color = colorBySlope ? slopeColor(p.slopeMax) : '#343a40'
+      const color = colors[i] ?? '#343a40'
       if (!cur || cur.color !== color) {
         if (cur) segs.push(line(cur.coords, { color: cur.color }))
         cur = { color, coords: i ? [ll(profile[i - 1])] : [] }
@@ -50,7 +53,7 @@ export default function TraceMap({ profile, pois, cursor, colorBySlope }: Props)
       setGeoJson(map, 'cursor', { type: 'FeatureCollection', features: [] })
       map.addLayer({ id: 'cursor', type: 'circle', source: 'cursor', paint: { 'circle-radius': 8, 'circle-color': '#212529', 'circle-stroke-color': '#fff', 'circle-stroke-width': 3 } })
       const b = boundsOf(coords)
-      if (b) map.fitBounds(b, { padding: 50, duration: 0 })
+      if (b) fitTo(b, { padding: 50, duration: 0 })
     }
 
     markers.current.forEach((m) => m.remove())
@@ -67,7 +70,7 @@ export default function TraceMap({ profile, pois, cursor, colorBySlope }: Props)
     start.className = 'start-mark'
     start.textContent = 'D'
     markers.current.push(new maplibregl.Marker({ element: start }).setLngLat(ll(profile[0])).addTo(map))
-  }, [map, profile, colorBySlope, total])
+  }, [map, profile, colors, total])
 
   // Points d'intérêt affichés, avec une info-bulle colorée au survol.
   useEffect(() => {
@@ -129,6 +132,36 @@ export default function TraceMap({ profile, pois, cursor, colorBySlope }: Props)
       map.off('zoom', update)
     }
   }, [map])
+
+  // Zoom de la carte → partie du profil affichée. Si la trace passe plusieurs
+  // fois dans la vue (boucle), on garde le plus long passage visible.
+  useEffect(() => {
+    if (!map || !onView || profile.length < 2) return
+    const update = () => {
+      const b = map.getBounds()
+      const gap = total * 0.02
+      let best: [number, number] | null = null
+      let run: [number, number] | null = null
+      let lastKm = -Infinity
+      let count = 0
+      for (const p of profile) {
+        if (!b.contains([p.lon, p.lat])) continue
+        count++
+        if (run && p.km - lastKm <= gap) run[1] = p.km
+        else run = [p.km, p.km]
+        lastKm = p.km
+        if (!best || run[1] - run[0] > best[1] - best[0]) best = [run[0], run[1]]
+      }
+      // Trace entière visible, ou presque rien : profil complet.
+      if (!best || count === profile.length || best[1] - best[0] < total * 0.002) onView(null)
+      else onView(best)
+    }
+    update()
+    map.on('moveend', update)
+    return () => {
+      map.off('moveend', update)
+    }
+  }, [map, profile, total, onView])
 
   // Curseur du profil → point et partie parcourue sur la carte.
   useEffect(() => {

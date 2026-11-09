@@ -12,6 +12,7 @@ pub mod model;
 pub mod organize;
 pub mod scan;
 pub mod sport;
+pub mod surface;
 
 pub use analyze::{analyze_file, analyze_gpx};
 pub use error::{Error, Result};

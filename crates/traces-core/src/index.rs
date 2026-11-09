@@ -7,6 +7,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::error::{Error, Result};
 use crate::model::*;
 
+/// Version des règles d’analyse : la changer fait relire tous les fichiers une fois.
+const ANALYSIS_VERSION: &str = "2";
+
 const SCHEMA: &str = r#"
 PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS libraries (
@@ -76,6 +79,13 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL
 );
 -- Paires de traces que l'utilisateur a déclarées « pas des doublons » (a < b).
+-- Revêtement calculé depuis OpenStreetMap ; `geom_key` invalide le calcul si la trace change.
+CREATE TABLE IF NOT EXISTS trace_surface (
+    trace_id    INTEGER PRIMARY KEY REFERENCES traces(id) ON DELETE CASCADE,
+    geom_key    TEXT NOT NULL,
+    runs_json   TEXT NOT NULL,
+    computed_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS not_duplicates (
     a INTEGER NOT NULL REFERENCES traces(id) ON DELETE CASCADE,
     b INTEGER NOT NULL REFERENCES traces(id) ON DELETE CASCADE,
@@ -155,6 +165,13 @@ impl Index {
             if !exists {
                 self.conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"))?;
             }
+        }
+        // Règles d'analyse changées (2 : `mtb_easy` de Komoot = Gravel) : les fichiers
+        // seront relus à la prochaine relecture des dossiers (tags, notes et collections gardés).
+        if self.setting("analysis_version")?.as_deref() != Some(ANALYSIS_VERSION) {
+            // Empreinte factice et unique : relecture complète sans créer de faux doublons.
+            self.conn.execute("UPDATE traces SET file_mtime = 0, file_hash = 'relire-' || id", [])?;
+            self.set_setting("analysis_version", ANALYSIS_VERSION)?;
         }
         Ok(())
     }
@@ -707,6 +724,16 @@ impl Index {
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let mut st = self.conn.prepare("SELECT collection_id FROM collection_traces WHERE trace_id = ?1")?;
         let collection_ids = st.query_map([id], |r| r.get(0))?.collect::<std::result::Result<Vec<i64>, _>>()?;
+        let profile: Vec<ProfilePoint> = serde_json::from_str(&profile_json)?;
+        let surface = self
+            .conn
+            .query_row("SELECT geom_key, runs_json FROM trace_surface WHERE trace_id = ?1", [id], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            })
+            .optional()?
+            .filter(|(key, _)| *key == geom_key(&profile))
+            .map(|(_, json)| serde_json::from_str(&json))
+            .transpose()?;
         Ok(TraceDetail {
             collection_ids,
             summary,
@@ -716,7 +743,8 @@ impl Index {
             notes,
             has_time,
             creator,
-            profile: serde_json::from_str(&profile_json)?,
+            profile,
+            surface,
             pois,
         })
     }
@@ -774,6 +802,39 @@ fn row_to_summary(r: &rusqlite::Row) -> rusqlite::Result<TraceSummary> {
         poi_count: r.get(12)?,
         tags: tags.map(|t| t.split('\u{1f}').map(String::from).collect()).unwrap_or_default(),
     })
+}
+
+/// Empreinte de la géométrie : le revêtement est à recalculer si la trace change
+/// (mais pas si seuls les tags ou les notes du GPX changent).
+fn geom_key(profile: &[ProfilePoint]) -> String {
+    match (profile.first(), profile.last()) {
+        (Some(a), Some(b)) => format!("{}:{:.3}:{:.5},{:.5}:{:.5},{:.5}", profile.len(), b.km, a.lat, a.lon, b.lat, b.lon),
+        _ => String::new(),
+    }
+}
+
+impl Index {
+    /// Géométrie de la trace (profil) pour le calcul du revêtement.
+    pub fn profile(&self, id: i64) -> Result<Vec<ProfilePoint>> {
+        let json: String = self
+            .conn
+            .query_row("SELECT profile_json FROM traces WHERE id = ?1", [id], |r| r.get(0))
+            .optional()?
+            .ok_or_else(|| Error::NotFound(format!("trace {id}")))?;
+        Ok(serde_json::from_str(&json)?)
+    }
+
+    /// Enregistre le revêtement calculé depuis OpenStreetMap.
+    pub fn set_surface(&self, id: i64, runs: &[crate::surface::SurfaceRun], now: i64) -> Result<()> {
+        let key = geom_key(&self.profile(id)?);
+        self.conn.execute(
+            "INSERT INTO trace_surface(trace_id, geom_key, runs_json, computed_at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(trace_id) DO UPDATE SET geom_key = excluded.geom_key, runs_json = excluded.runs_json,
+             computed_at = excluded.computed_at",
+            params![id, key, serde_json::to_string(runs)?, now],
+        )?;
+        Ok(())
+    }
 }
 
 /// Sous-échantillonnage régulier du profil pour les vignettes.

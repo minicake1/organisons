@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{Manager, State};
 use traces_core::scan::{scan_library, write_trace_meta};
 use traces_core::{
-    organize, sport, Collection, DuplicateGroup, DuplicateSet, Index, Library, OrganizeReport, PlannedMove,
+    organize, sport, surface, Collection, DuplicateGroup, DuplicateSet, Index, Library, OrganizeReport, PlannedMove,
     ScanReport, SetAsideInfo, TagCount, TraceDetail, TraceFilter, TraceSummary,
 };
 
@@ -111,6 +111,15 @@ fn set_notes(state: State<AppState>, id: i64, notes: String) -> CmdResult<()> {
 #[tauri::command]
 fn set_surface_type(state: State<AppState>, id: i64, surface: Option<String>) -> CmdResult<()> {
     state.index.lock().map_err(err)?.set_surface_type(id, surface.as_deref()).map_err(err)
+}
+
+/// Associe la trace aux voies lues dans les tuiles OSM et enregistre le revêtement.
+#[tauri::command]
+fn set_surface(state: State<AppState>, id: i64, ways: Vec<surface::OsmWay>) -> CmdResult<Vec<surface::SurfaceRun>> {
+    let index = state.index.lock().map_err(err)?;
+    let runs = surface::match_surface(&index.profile(id).map_err(err)?, &ways);
+    index.set_surface(id, &runs, now()).map_err(err)?;
+    Ok(runs)
 }
 
 #[tauri::command]
@@ -306,6 +315,7 @@ pub fn run() {
             set_notes,
             set_surface_type,
             set_sport,
+            set_surface,
             sports,
             all_tags,
             duplicates,

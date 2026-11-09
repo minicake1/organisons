@@ -1,5 +1,5 @@
 // Libellés, couleurs et formats partagés par les écrans.
-import type { Hilliness, PoiKind, Wind } from './api'
+import type { Hilliness, PoiKind, SurfaceClass, Wind } from './api'
 
 export const HILLINESS: Record<Hilliness, string> = {
   FLAT: 'Plat',
@@ -55,3 +55,13 @@ export const date = (unix: number) => new Date(unix * 1000).toLocaleDateString('
 export function niceStep(target: number, steps: number[]): number {
   return steps.find((s) => s >= target) ?? steps[steps.length - 1]
 }
+
+/** Revêtement calculé depuis OpenStreetMap : libellés et couleurs du profil et de la carte. */
+export const SURFACE_CLASSES: { value: SurfaceClass; label: string; color: string }[] = [
+  { value: 'paved', label: 'Asphalte', color: '#5c7cfa' },
+  { value: 'cobbles', label: 'Pavés', color: '#ae3ec9' },
+  { value: 'gravel', label: 'Stabilisé, gravier', color: '#f59f00' },
+  { value: 'unpaved', label: 'Chemin, terre', color: '#8d5524' },
+  { value: 'unknown', label: 'Inconnu', color: '#ced4da' },
+]
+export const surfaceColor = (c: SurfaceClass) => SURFACE_CLASSES.find((s) => s.value === c)?.color ?? '#ced4da'

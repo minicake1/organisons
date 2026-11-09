@@ -19,7 +19,9 @@ export default function TrackThumb({ id, preview, height = 160 }: { id?: number;
       (entries) => {
         if (!entries.some((e) => e.isIntersecting)) return
         io.disconnect()
-        const r = requestThumb(key, preview)
+        // Rendue à la taille affichée (largeur arrondie à 20 px pour réutiliser le cache).
+        const w = Math.round((box.current?.clientWidth || THUMB_W) / 20) * 20
+        const r = requestThumb(key, preview, w, height)
         cancel = r.cancel
         if (r.cached) setImg(r.cached)
         r.promise?.then((url) => alive && setImg(url)).catch(() => {})
