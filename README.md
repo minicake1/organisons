@@ -1,99 +1,152 @@
-# Organisons — v0.2
+# Organisons, v0.4
 
-Application de bureau pour classer, filtrer et préparer ses traces GPX, dans l'esprit de Pédalons.
-Tauri 2 (cœur en Rust) + React, Mantine et MapLibre.
+Application de bureau pour classer, filtrer et préparer ses traces GPX vélo, sur son PC et son NAS, dans l'esprit de Pédalons.
+Tauri 2 (cœur en Rust), React, Mantine et MapLibre. Interface en français, pour Windows (macOS prévu plus tard).
 
-## Ce que fait la v0.1
+## Ce que fait Organisons
 
-- **Bibliothèques** : ajout d'un dossier sur le PC ou sur le NAS (lecteur réseau ou chemin `\\NAS\…`), indexation récursive des `.gpx`. Une relecture ne réanalyse que les fichiers modifiés et retire ceux qui ont disparu.
-- **Analyse de chaque GPX** (crate `traces-core`) :
-  - distance (haversine) ;
-  - dénivelé lissé sur 250 m avec seuil de 3 m ;
-  - points haut et bas ;
-  - relief selon les seuils de Pédalons (< 8, 8–15, > 15 m/km) ;
-  - vent idéal (méthode de biketeam : la trace part face au vent et revient vent dans le dos) ;
-  - points d'intérêt classés en contrôles, alertes, eau, commerces et curiosités (codes Openrunner, symboles Garmin, puis nom) ;
-  - profil de 200 à 2 000 points avec pente locale, pente la plus forte du tronçon et heures de passage.
-- **Bibliothèque** :
-  - filtres de Pédalons (recherche, distance, D+, relief, revêtement, direction du vent) plus source, tags, vent ±45° et tri croissant ou décroissant ;
-  - 4 affichages : grille, liste + carte centrée sur la trace sélectionnée, liste, carte de toutes les traces.
-- **Fiche trace** :
-  - carte avec bornes kilométriques adaptées à la longueur ;
-  - profil coloré par pente, dont le curseur déplace un point sur la carte et surligne la partie parcourue ;
-  - points d'intérêt filtrables par catégorie ou un par un ;
-  - tags, notes et type de revêtement enregistrés dans l'index.
-- **Fond de carte** : OpenFreeMap (gratuit, sans clé). Sans internet, la carte passe sur un fond uni et la trace reste visible.
+### Bibliothèque
 
-## Nouveautés de la v0.2
+- **Dossiers du PC ou du NAS** (lecteur réseau ou chemin `\\NAS\…`), lus récursivement. Une relecture ne réanalyse que les fichiers modifiés.
+- **Deux modes de bibliothèque** :
+  - *indexée sur place* : les fichiers restent où ils sont ;
+  - *gérée* : rangée selon un modèle de dossiers modifiable dans les Réglages (`{sport}/{année}/{nom}.gpx` par défaut, avec aussi `{mois}`, `{source}`, `{collection}`). Le rangement montre toujours un aperçu, et rien ne bouge avant validation.
+- **Quatre affichages** : tuiles avec fond de carte, liste + carte, liste, carte de toutes les traces.
+- **Filtres** : recherche, distance, dénivelé, relief, sport, direction du vent (±45° en option), source, tags, collection. Tri par date, distance, dénivelé, relief, nom (dans l'ordre des nombres : np#2 avant np#10) ou sport.
+- **Modification par lot** : sélectionner plusieurs traces pour ajouter ou retirer des tags, changer le sport, ajouter ou retirer des collections.
+- **NAS éteint** : la bibliothèque reste consultable, et une relecture ne retire rien de l'index.
 
-- **Noms des points d'intérêt** masqués sur une vue d'ensemble (zoom < 11), affichés en zoomant ; le nom reste visible au survol de la pastille.
-- **Tags et notes dans le GPX** : option par bibliothèque (activée par défaut pour une bibliothèque gérée). Ils sont écrits dans `<extensions>` sans toucher au reste du fichier, et relus si l'index est remis à zéro. Le fichier modifié est vérifié (même nombre de points) avant de remplacer l'original.
-- **Sport** : lu dans le champ `<type>` du GPX (Komoot, Garmin…) et modifiable sur la fiche : Route, Gravel, VTT, Randonnée, Course à pied, Vélo par défaut.
-- **Bibliothèques gérées** :
-  - « Importer des GPX… » copie les fichiers directement à leur place ; les originaux ne bougent pas ;
-  - « Ranger… » montre d'abord la liste des déplacements, et rien ne bouge avant validation ;
-  - modèle `{sport}/{annee}/{nom}.gpx`, avec aussi `{mois}`, `{source}` et `{collection}` ;
-  - noms rendus compatibles avec Windows et les NAS, numérotés « (2) » en cas de doublon de nom ; dossiers vidés supprimés.
-- **Écran Tags** : nombre de traces par tag, renommage (fusion si le nom existe déjà), suppression. Les GPX concernés sont réécrits.
-- **Écran Collections** : listes nommées de traces, une trace pouvant appartenir à plusieurs. On les remplit depuis la fiche, et on les filtre dans la Bibliothèque.
-- **Écran Doublons** : fichiers identiques et doublons probables (même distance, D+, départ et arrivée). Rien n'est supprimé : « Mettre de côté » déplace le fichier dans le dossier caché `.organisons-doublons` de sa bibliothèque.
+### Analyse de chaque trace
 
-Toujours prévu (déjà présent dans les maquettes) :
-- synchronisation Komoot ;
-- Agenda Pédalons ;
-- envoi vers Garmin, Hammerhead et Wahoo, et copie USB vers un Edge ;
-- revêtement calculé depuis OpenStreetMap ;
-- modèle de rangement modifiable dans les Réglages.
+- Distance, dénivelé lissé, points haut et bas, relief selon les seuils de Pédalons (< 8, 8–15, > 15 m/km).
+- Vent idéal, selon la méthode de biketeam : la trace part face au vent et revient vent dans le dos.
+- Sport lu dans le GPX (`<type>` de Komoot ou Garmin, ou un mot du titre) : Route, Gravel, VTT, Randonnée, Course à pied, Vélo.
+- Nom nettoyé (sans `_`, ni date, ni identifiant Openrunner), date lue dans le titre ; l'identifiant retiré est gardé dans les notes.
+- Points d'intérêt classés : contrôles, attention, eau, commerces, curiosités (codes Openrunner, symboles Garmin, puis nom).
 
-## Installer et lancer (Windows)
+### Fiche d'une trace
 
-1. Installer les prérequis Tauri : https://v2.tauri.app/start/prerequisites/
+- Carte avec bornes kilométriques et bouton « recentrer ».
+- Profil coloré selon la pente la plus forte de chaque tronçon. Son curseur se suit sur la carte, et il suit le zoom de la carte.
+- **Revêtement** calculé depuis OpenStreetMap (tuiles vectorielles VersaTiles) : asphalte, pavés, stabilisé, chemin. Le profil et la carte sont colorés, avec la part de chaque type en km et en %.
+- Au survol d'une légende (pente ou revêtement), le type ressort et les autres s'atténuent.
+- Points d'intérêt affichés par catégorie (repliables) ou par km.
+- Classement en lecture ou en édition : sport, tags, collections, notes.
+
+### Tags
+
+- **Tags proposés** : détectés dans le titre, la description et les mots-clés du GPX (BRM 600, Brevet, Gravel…). Ils sont seulement proposés : à valider sur la fiche, ou par lot après un import ou un rangement.
+- On peut créer ses propres tags avec la **détection automatique** et des **mots-clés** : par exemple `NP#` trouve « np#614 ».
+- Renommer (avec fusion), supprimer.
+- Tags et notes écrits dans le GPX, si la bibliothèque l'autorise. Seul le bloc `<extensions>` est modifié, et le fichier est vérifié avant de remplacer l'original.
+
+### Collections et tours
+
+- Collections : listes nommées de traces, ouvertes dans l'onglet Collections.
+- **Tour** : une collection dont les traces sont des étapes.
+  - Carte et profil enchaînés, une couleur par étape ;
+  - chiffres du tour entier ou d'une étape ;
+  - ordre changé en glissant les étapes ;
+  - export en un seul GPX (une piste par étape) ou étape par étape.
+
+### Imports
+
+- **Fichiers GPX** dans une bibliothèque gérée : copiés directement à leur place. Les doublons sont détectés avant la copie.
+- **Komoot** : connexion au compte, liste des parcours planifiés et réalisés, import en lot avec avancement. Le mot de passe n'est pas conservé ; le jeton d'accès est rangé dans le gestionnaire d'identifiants de Windows. Komoot n'a pas d'API publique : Organisons passe par l'API de son site, qui peut changer sans prévenir.
+- **Openrunner** : coller les liens des parcours publics. Ils sont téléchargés avec leurs points d'intérêt. Un parcours privé doit être exporté depuis le site.
+- Un parcours déjà présent dans la bibliothèque (même fichier ou même parcours) n'est pas importé une seconde fois.
+
+### Doublons et corbeille
+
+- **Doublons** : fichiers identiques et doublons probables (distance à ±1 %, D+ à ±5 %, départ et arrivée à moins de 300 m).
+  - On peut les traiter un par un ou par lot : on choisit la trace à garder (la plus ancienne, la plus récente, la plus taguée, celle de la bibliothèque gérée) et on met les autres de côté.
+  - Un doublon mis de côté est déplacé dans le dossier caché `.organisons-doublons` de sa bibliothèque.
+- **Corbeille** : une trace supprimée part dans `.organisons-corbeille`, après confirmation.
+  - L'onglet Corbeille liste les traces supprimées et les doublons mis de côté, restaurables un par un.
+  - Vidage manuel, ou automatique après 7, 14 ou 30 jours.
+
+### Navigation
+
+- Alt+← et Alt+→, ou les boutons latéraux de la souris, pour revenir à l'écran précédent ou suivant.
+
+## Installer
+
+### Avec l'installateur (Windows)
+
+Lancer `Organisons_<version>_x64_fr-FR.msi` ou `Organisons_<version>_x64-setup.exe`, produits par `npm run tauri build` dans `target/release/bundle/`. L'appli s'installe dans `C:\Program Files\Organisons`. Elle utilise WebView2, déjà présent sur Windows 11.
+
+### Depuis les sources
+
+1. Installer les prérequis de Tauri 2 : https://v2.tauri.app/start/prerequisites/
    - Rust (rustup), avec la chaîne MSVC ;
    - Microsoft C++ Build Tools (« Développement Desktop en C++ ») ;
-   - WebView2, déjà présent sur Windows 11.
+   - WebView2.
 2. Installer Node.js 20 ou plus récent.
 3. Dans le dossier du projet :
 
 ```bash
 npm install
-npm run tauri dev      # lance l'appli en développement
-npm run tauri build    # produit l'installateur (.msi / .exe) dans target/release/bundle
+npm run tauri dev      # appli en développement
+npm run tauri build    # installateurs .msi et .exe dans target/release/bundle
 ```
 
-Au premier lancement, va dans **Réglages** puis **Choisir le dossier…** et sélectionne ton dossier de GPX.
+Au premier lancement, ajoute un dossier de GPX dans **Réglages**.
 
-L'index est enregistré dans `%APPDATA%\fr.organisons.app\index.sqlite`. Le supprimer remet l'appli à zéro (les tags et notes écrits dans les GPX reviennent à la relecture). Tes fichiers GPX ne sont modifiés que si tu l'as autorisé : écriture des tags et notes (option par bibliothèque), rangement validé dans l'aperçu, doublon mis de côté.
+## Données et sécurité des fichiers
+
+- L'index est dans `%APPDATA%\fr.organisons.app\index.sqlite`. La version de développement utilise `index-dev.sqlite`, une copie faite au premier lancement. Supprimer l'index remet l'appli à zéro ; les tags et notes écrits dans les GPX reviennent à la relecture.
+- Tes fichiers GPX ne sont modifiés ou déplacés que si tu l'as demandé :
+  - écriture des tags et notes (option par bibliothèque) ;
+  - rangement validé dans l'aperçu ;
+  - doublon mis de côté ou trace mise à la corbeille, ce qui reste récupérable jusqu'au vidage.
+- Rien n'est supprimé définitivement sans confirmation, sauf par le vidage automatique, si on l'a activé.
 
 ## Organisation du code
 
 ```
-crates/traces-core/   cœur Rust sans interface : analyse GPX, index SQLite, scan des dossiers
-  src/analyze.rs      calculs (distance, dénivelé, pente, vent, POI, profil)
-  src/index.rs        base SQLite, filtres et tri
-  src/scan.rs         parcours des dossiers, empreinte SHA-256 (doublons)
-  tests/brm600.rs     tests sur le BRM 600 Tour de Manche (fichier réel)
-  examples/indexer.rs indexation en ligne de commande
-src-tauri/            application Tauri : commandes exposées à l'interface
-src/                  interface React (pages Bibliothèque, Fiche trace, Réglages)
+crates/traces-core/     cœur Rust sans interface, testé seul
+  src/analyze.rs        distance, dénivelé, pente, vent, POI, profil
+  src/index.rs          base SQLite : traces, tags, collections, tours, doublons, réglages
+  src/scan.rs           parcours des dossiers, empreinte SHA-256, tags et notes relus dans le GPX
+  src/gpxmeta.rs        écriture des tags et notes dans <extensions>, fichier inchangé par ailleurs
+  src/organize.rs       rangement, import, doublons mis de côté, corbeille
+  src/naming.rs         nom nettoyé, date du titre, identifiant Openrunner
+  src/autotags.rs       tags proposés
+  src/sport.rs          sport d'après le GPX ou le titre
+  src/surface.rs        revêtement depuis les voies OpenStreetMap
+  src/tour.rs           export des tours
+  tests/brm600.rs       tests sur un vrai fichier (BRM 600 Tour de Manche, Openrunner)
+src-tauri/src/          application Tauri : commandes, Komoot (komoot.rs), Openrunner (openrunner.rs)
+src/                    interface React : pages Bibliothèque, Fiche, Tour, Collections, Tags,
+                        Doublons, Corbeille, Komoot, Openrunner, Réglages
 ```
 
-## Inspirations
-
-Organisons est un projet indépendant, écrit de zéro : il ne reprend pas le code des projets ci-dessous, seulement des idées et des règles de calcul.
-
-- [Pédalons](https://github.com/glandais/pedalons) (Gabriel Landais, PolyForm Noncommercial 1.0.0) : seuils de relief (< 8, 8–15, > 15 m/km), filtres de la bibliothèque, catégories de revêtement.
-- [biketeam](https://github.com/tomacla/biketeam) (tomacla) : méthode du vent idéal (aller face au vent, retour vent dans le dos), reprise de gpx2web.
-
-Si du code de Pédalons est un jour repris (par exemple pour le calcul du revêtement), il faudra le signaler ici et conserver sa mention de copyright.
-
-## Licence
-
-[PolyForm Noncommercial 1.0.0](LICENSE.md), la même licence que Pédalons : utilisation, modification et redistribution autorisées, sauf à des fins commerciales.
+Les notes de développement (règles de conception, choix validés par version, pièges connus) sont dans [organisons.md](organisons.md).
 
 ## Tests
 
 ```bash
-cargo test -p traces-core
-# Indexer un dossier sans interface :
-cargo run -p traces-core --example indexer -- "D:\GPX"
+cargo test -p traces-core          # cœur : analyse, index, rangement, tours, corbeille…
+npm run build                      # vérification des types et build de l'interface
+cargo run -p traces-core --example indexer -- "D:\GPX"   # indexer un dossier sans interface
 ```
+
+## Feuille de route
+
+- **v0.5** : envoi vers les appareils GPS (Garmin, Wahoo, copie USB vers un Edge), entraînements avec les fichiers `.zwo`.
+- **Plus tard** : version macOS, agenda Pédalons.
+
+## Inspirations
+
+Organisons est un projet indépendant, écrit de zéro. Il ne reprend pas le code des projets ci-dessous, seulement des idées et des règles de calcul.
+
+- [Pédalons](https://github.com/glandais/pedalons) (Gabriel Landais, PolyForm Noncommercial 1.0.0) : seuils de relief, filtres de la bibliothèque, et l'idée de lire le revêtement dans les tuiles vectorielles OpenStreetMap au schéma Shortbread.
+- [biketeam](https://github.com/tomacla/biketeam) (tomacla) : méthode du vent idéal, reprise de gpx2web.
+
+Si du code de Pédalons est un jour repris, il faudra le signaler ici et conserver sa mention de copyright.
+
+Données cartographiques : © contributeurs OpenStreetMap ; fonds de carte OpenFreeMap ; tuiles du revêtement VersaTiles.
+
+## Licence
+
+[PolyForm Noncommercial 1.0.0](LICENSE.md), la même licence que Pédalons : utilisation, modification et redistribution autorisées, sauf à des fins commerciales.
