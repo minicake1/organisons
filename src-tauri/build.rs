@@ -3,6 +3,12 @@ fn main() {
     // et secret lus dans `hammerhead.local.env`, fichier local jamais versionné,
     // et intégrés à l'appli. Sans ce fichier, on les saisit dans les Réglages.
     println!("cargo:rerun-if-changed=hammerhead.local.env");
+    // Dès qu'un `rerun-if-changed` est déclaré, Cargo ne relance plus ce script pour
+    // les autres fichiers : sans ces lignes, l'icône Windows de l'exécutable (barre
+    // des tâches, menu Démarrer) restait l'ancienne après un changement d'icônes.
+    println!("cargo:rerun-if-changed=icons");
+    println!("cargo:rerun-if-changed=tauri.conf.json");
+    println!("cargo:rerun-if-changed=capabilities");
     // Version publique : `ORGANISONS_PUBLIC_BUILD=1` ignore le fichier, pour ne
     // jamais diffuser le secret (il serait lisible dans l'exécutable).
     println!("cargo:rerun-if-env-changed=ORGANISONS_PUBLIC_BUILD");
