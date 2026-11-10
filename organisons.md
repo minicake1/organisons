@@ -131,7 +131,7 @@ Avant de pousser une nouvelle version (changement du numéro dans `package.json`
 - MapLibre 6 : le worker (`maplibre-gl-worker.mjs`) doit être importé avec `?url` et passé à `maplibregl.setWorkerUrl` (fait dans `useMapLibre.ts`), sinon l’appli installée n’a pas de fond de carte (en dev, tout marche quand même).
 - L’installateur n’embarque aucune donnée : l’index est dans `%APPDATA%/fr.organisons.app/index.sqlite`.
 - **Version à diffuser** : toujours `npm run build:public`, jamais `npm run tauri build` (qui intègre le secret Hammerhead du PC de développement).
-- Dépôt GitHub **public** depuis le 10/11/2026 : https://github.com/minicake1/organisons (recréé avec un historique réécrit ; l’ancien dépôt privé s’appelle `organisons-ancien`). `gh` installé dans `C:Program FilesGitHub CLI`.
+- Dépôt GitHub **public** depuis le 10/11/2026 : https://github.com/minicake1/organisons (recréé avec un historique réécrit ; l’ancien dépôt privé s’appelle `organisons-ancien`). `gh` installé dans `C:\Program Files\GitHub CLI\`.
 - **CI** (`.github/workflows/ci.yml`) : à chaque push sur `main` et pull request, `cargo test -p traces-core` et `npm run build` sous Linux, `npm run build` puis `cargo check`/`cargo test -p organisons` sous Windows (Tauri intègre `dist/` à la compilation). Premier passage vert le 10/11/2026 (≈ 6 min).
 
 ## Feuille de route
