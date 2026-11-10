@@ -234,7 +234,7 @@ export default function TourPage({ id, onBack, onOpen }: { id: number; onBack: (
         </Menu>
       </Group>
       {notice && (
-        <Paper withBorder p="sm" bg="teal.0" c="teal.9" onClick={() => setNotice(null)} style={{ wordBreak: 'break-all' }}>
+        <Paper withBorder p="sm" bg="var(--mantine-color-teal-light)" c="var(--mantine-color-teal-light-color)" onClick={() => setNotice(null)} style={{ wordBreak: 'break-all' }}>
           {notice}
         </Paper>
       )}
@@ -299,7 +299,7 @@ export default function TourPage({ id, onBack, onOpen }: { id: number; onBack: (
                       gap={6}
                       onMouseEnter={() => setHlSlope(c)}
                       onMouseLeave={() => setHlSlope(null)}
-                      style={{ cursor: 'default', padding: '2px 6px', margin: '-2px -6px', borderRadius: 6, background: hlSlope === c ? '#f1f3f5' : undefined }}
+                      style={{ cursor: 'default', padding: '2px 6px', margin: '-2px -6px', borderRadius: 6, background: hlSlope === c ? 'var(--mantine-color-default-hover)' : undefined }}
                     >
                       <Box w={12} h={12} style={{ borderRadius: 3, background: c }} />
                       <Text size="xs">{l}</Text>
@@ -307,7 +307,7 @@ export default function TourPage({ id, onBack, onOpen }: { id: number; onBack: (
                   ))}
                 </Group>
               )}
-              <SimpleGrid cols={5} pt="xs" style={{ borderTop: '1px solid #f1f3f5' }}>
+              <SimpleGrid cols={5} pt="xs" style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}>
                 <Stat value={`${km1(total.km)} km`} label="Distance" />
                 <Stat value={`${int(total.up)} m`} label="Montée" />
                 <Stat value={`${int(total.down)} m`} label="Descente" />
@@ -317,11 +317,12 @@ export default function TourPage({ id, onBack, onOpen }: { id: number; onBack: (
             </Stack>
           </Paper>
 
-          <Stack gap="xs" style={{ width: 360, flexShrink: 0, overflowY: 'auto', paddingRight: 4 }}>
+          {/* Marge autour des étapes : la colonne défile, donc rogne ce qui dépasse ; le halo du survol (≈ 14 px) doit tenir dedans. */}
+          <Stack gap="xs" style={{ width: 388, flexShrink: 0, overflowY: 'auto', padding: '8px 14px' }}>
             <UnstyledButton
               onClick={() => setSel(null)}
               p="sm"
-              style={{ borderRadius: 8, border: '1px solid #dee2e6', background: sel == null ? '#fff4e6' : '#fff' }}
+              style={{ borderRadius: 8, border: '1px solid var(--mantine-color-default-border)', background: sel == null ? 'var(--mantine-color-orange-light)' : 'var(--mantine-color-body)' }}
             >
               <Text fw={600} size="sm">
                 Tout le tour
@@ -347,7 +348,7 @@ export default function TourPage({ id, onBack, onOpen }: { id: number; onBack: (
               </Button>
             </Group>
             {selecting && (
-              <Paper withBorder p="xs" radius="md" bg="blue.0">
+              <Paper withBorder p="xs" radius="md" bg="var(--mantine-color-blue-light)">
                 <Group gap={6}>
                   <Text size="xs" fw={600}>
                     {picked.length} étape(s)
@@ -405,12 +406,17 @@ export default function TourPage({ id, onBack, onOpen }: { id: number; onBack: (
                     userSelect: 'none',
                     touchAction: 'none',
                     opacity: dragging ? 0.5 : 1,
-                    borderLeft: `5px solid ${stageColor(i)}`,
-                    background: sel === i ? '#f4f6ff' : undefined,
+                    // Bande de couleur de l’étape : un élément dans la carte, découpé par son
+                    // arrondi (overflow), pour que le halo du survol entoure toute la carte.
+                    position: 'relative',
+                    overflow: 'hidden',
+                    paddingLeft: 'calc(var(--mantine-spacing-sm) + 5px)',
+                    background: sel === i ? 'var(--mantine-color-indigo-light)' : undefined,
                     boxShadow: dropLine ?? glow,
                     transition: 'box-shadow 0.12s',
                   }}
                 >
+                  <div aria-hidden style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 5, background: stageColor(i) }} />
                   <Group gap="xs" wrap="nowrap" align="flex-start">
                     {selecting ? (
                       <Checkbox aria-label={`Sélectionner ${s.name}`} checked={picked.includes(s.id)} readOnly mt={2} style={{ pointerEvents: "none" }} />

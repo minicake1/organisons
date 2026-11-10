@@ -185,7 +185,7 @@ export default function LibraryPage({
       </Group>
 
       {offline.length > 0 && (
-        <Paper withBorder p="sm" bg="yellow.0" c="yellow.9">
+        <Paper withBorder p="sm" bg="var(--mantine-color-yellow-light)" c="var(--mantine-color-yellow-light-color)">
           {libraries
             .filter((l) => offline.includes(l.id))
             .map((l) => l.name)
@@ -196,13 +196,13 @@ export default function LibraryPage({
       )}
 
       {notice && (
-        <Paper withBorder p="sm" bg="teal.0" c="teal.9" onClick={() => setNotice(null)}>
+        <Paper withBorder p="sm" bg="var(--mantine-color-teal-light)" c="var(--mantine-color-teal-light-color)" onClick={() => setNotice(null)}>
           {notice}
         </Paper>
       )}
 
       {error && (
-        <Paper withBorder p="sm" bg="red.0" c="red.9" style={{ whiteSpace: 'pre-line' }} onClick={() => setError(null)}>
+        <Paper withBorder p="sm" bg="var(--mantine-color-red-light)" c="var(--mantine-color-red-light-color)" style={{ whiteSpace: 'pre-line' }} onClick={() => setError(null)}>
           {error}
         </Paper>
       )}
@@ -240,7 +240,7 @@ export default function LibraryPage({
       </Group>
 
       {selecting && (
-        <Paper withBorder p="xs" radius="md" bg="blue.0" style={{ position: 'sticky', top: 0, zIndex: 5 }}>
+        <Paper withBorder p="xs" radius="md" bg="var(--mantine-color-blue-light)" style={{ position: 'sticky', top: 0, zIndex: 5 }}>
           <Group gap="sm">
             <Text size="sm" fw={600}>
               {shown.length} trace(s) sélectionnée(s)
@@ -479,10 +479,10 @@ export default function LibraryPage({
                     aria-pressed={on}
                     w="100%"
                     p="md"
-                    style={{ display: 'flex', gap: 14, borderBottom: '1px solid #f1f3f5', background: on ? '#f4f6ff' : undefined }}
+                    style={{ display: 'flex', gap: 14, borderBottom: '1px solid var(--mantine-color-default-border)', background: on ? 'var(--mantine-color-indigo-light)' : undefined }}
                   >
                     {selecting && <Checkbox aria-label={`Sélectionner ${t.name}`} checked={picked.includes(t.id)} readOnly style={{ alignSelf: "center", pointerEvents: "none" }} />}
-                    <div style={{ width: 6, borderRadius: 3, background: on ? '#4263eb' : '#ced4da', flex: 'none' }} />
+                    <div style={{ width: 6, borderRadius: 3, background: on ? '#4263eb' : 'var(--mantine-color-default-border)', flex: 'none' }} />
                     <Stack gap={6} style={{ flex: 1, minWidth: 0 }}>
                       <Group gap={8} wrap="nowrap">
                         <SportBadge sport={t.sport} size="xs" style={{ flex: "none" }} />
@@ -584,7 +584,7 @@ export default function LibraryPage({
                     <Table.Td>
                       <SportBadge sport={t.sport} size="sm" />
                     </Table.Td>
-                    <Table.Td c="blue.8">
+                    <Table.Td c="var(--mantine-color-blue-light-color)">
                       <Group gap={4}>
                         <WindArrow wind={t.wind} />
                         {windLabel(t.wind)}
@@ -634,15 +634,15 @@ function MinMax(props: { label: string; unit: string; min?: number; max?: number
 function TraceFigures({ t }: { t: TraceSummary }) {
   return (
     <Group gap="md">
-      <Text size="sm" c="dark.4">
+      <Text size="sm" c="dimmed">
         {km1(t.distanceKm)} km
       </Text>
-      <Text size="sm" c="dark.4">
+      <Text size="sm" c="dimmed">
         ↑ {int(t.elevationGain)} m
       </Text>
-      <Group gap={4} c="blue.8">
+      <Group gap={4} c="var(--mantine-color-blue-light-color)">
         <WindArrow wind={t.wind} />
-        <Text size="sm" c="blue.8">
+        <Text size="sm" c="var(--mantine-color-blue-light-color)">
           Vent {windShort(t.wind)}
         </Text>
       </Group>

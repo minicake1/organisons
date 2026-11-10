@@ -355,7 +355,7 @@ export default function ManagedActions({
                   )}
                   <TagSuggestions label="" suggestions={t.tagSuggestions} onAdd={(add) => addTags(t, add)} onIgnore={(ign) => ignoreTags(t, ign)} />
                   {t.tagSuggestions.length === 0 && (
-                    <Text size="xs" c="green.8">
+                    <Text size="xs" c="var(--mantine-color-green-light-color)">
                       Fait.
                     </Text>
                   )}

@@ -16,7 +16,7 @@ import {
   Table,
   Text,
   TextInput,
-  Title,
+
 } from '@mantine/core'
 import { IconAlertTriangle, IconDownload, IconLogout, IconRefresh } from '@tabler/icons-react'
 import { listen } from '@tauri-apps/api/event'
@@ -127,7 +127,6 @@ export default function KomootPage({ onLibrary }: { onLibrary: () => void }) {
 
   return (
     <Stack gap="md" maw={1100}>
-      <Title order={2}>Komoot</Title>
       <Alert color="yellow" icon={<IconAlertTriangle size={18} />} p="sm">
         Komoot n'a pas d'API publique : Organisons utilise celle de son site, comme ses applis. Elle peut changer ou cesser de fonctionner
         sans prévenir.
@@ -196,12 +195,12 @@ export default function KomootPage({ onLibrary }: { onLibrary: () => void }) {
         </Paper>
       )}
       {error && (
-        <Paper withBorder p="sm" bg="red.0" c="red.9" style={{ whiteSpace: 'pre-line' }}>
+        <Paper withBorder p="sm" bg="var(--mantine-color-red-light)" c="var(--mantine-color-red-light-color)" style={{ whiteSpace: 'pre-line' }}>
           {error}
         </Paper>
       )}
       {notice && (
-        <Paper withBorder p="sm" bg="teal.0" c="teal.9">
+        <Paper withBorder p="sm" bg="var(--mantine-color-teal-light)" c="var(--mantine-color-teal-light-color)">
           <Group gap="xs">
             <Text size="sm">{notice}</Text>
             <Button size="compact-sm" variant="white" onClick={onLibrary}>
@@ -214,7 +213,7 @@ export default function KomootPage({ onLibrary }: { onLibrary: () => void }) {
       {account && tours === null && busy === 'list' && <Loader />}
       {account && tours && (
         <Paper withBorder radius="md">
-          <Group p="sm" gap="md" style={{ borderBottom: '1px solid #f1f3f5' }}>
+          <Group p="sm" gap="md" style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}>
             <SegmentedControl
               size="xs"
               value={kind}

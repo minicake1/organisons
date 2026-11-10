@@ -97,12 +97,69 @@ pub fn with_meta(xml: &str, meta: &GpxMeta) -> std::result::Result<String, Strin
 /// doit se relire comme un GPX valide avec le même nombre de points, puis il
 /// remplace l'ancien d'un seul coup (fichier temporaire + renommage).
 pub fn write_meta_file(path: &Path, meta: &GpxMeta) -> Result<bool> {
+    rewrite(path, |xml| with_meta(xml, meta).map_err(|e| e.to_string()))
+}
+
+/// Remplace le contenu d'un `<name>` situé entre `from` et `until` (s'il y en a
+/// un), sinon renvoie `None`.
+fn replace_name_between(xml: &str, from: usize, until: usize, escaped: &str) -> Option<String> {
+    let start = xml[from..until].find("<name>")? + from + "<name>".len();
+    let end = xml[start..until].find("</name>")? + start;
+    Some(format!("{}{escaped}{}", &xml[..start], &xml[end..]))
+}
+
+/// Renvoie le GPX avec un nouveau nom : `<name>` de la première piste (ou du
+/// premier itinéraire), ajouté s'il manque, et celui des métadonnées s'il existe.
+/// Le reste du fichier est inchangé.
+pub fn with_name(xml: &str, name: &str) -> std::result::Result<String, String> {
+    let escaped = escape(name.trim());
+    if escaped.is_empty() {
+        return Err("nom vide".into());
+    }
+    let mut out = xml.to_string();
+    // Piste, sinon itinéraire : le nom est avant les segments ou les points.
+    let block = [("<trk>", "<trk ", "<trkseg"), ("<rte>", "<rte ", "<rtept")]
+        .into_iter()
+        .find_map(|(a, b, body)| out.find(a).or_else(|| out.find(b)).map(|s| (s, body)));
+    let Some((start, body)) = block else { return Err("ni piste ni itinéraire dans le GPX".into()) };
+    let tag_end = out[start..].find('>').ok_or("balise de piste non fermée")? + start + 1;
+    let until = out[tag_end..].find(body).map(|i| i + tag_end).unwrap_or(out.len());
+    out = match replace_name_between(&out, tag_end, until, &escaped) {
+        Some(s) => s,
+        None => format!("{}<name>{escaped}</name>{}", &out[..tag_end], &out[tag_end..]),
+    };
+    // Métadonnées : seulement si elles ont déjà un nom, qui est alors leur premier
+    // élément (ordre du GPX 1.1) ; jamais le <name> de <author>.
+    if let Some(start) = metadata_name_start(&out) {
+        let end = out[start..].find("</name>").map(|e| e + start).ok_or("nom des métadonnées non fermé")?;
+        out = format!("{}{escaped}{}", &out[..start], &out[end..]);
+    }
+    Ok(out)
+}
+
+/// Début du texte du `<name>` propre aux métadonnées (leur premier élément), s'il existe.
+pub(crate) fn metadata_name_start(xml: &str) -> Option<usize> {
+    let m = xml.find("<metadata")?;
+    let tag_end = xml[m..].find('>')? + m + 1;
+    let rest = &xml[tag_end..];
+    let skipped = rest.len() - rest.trim_start().len();
+    rest.trim_start().starts_with("<name>").then_some(tag_end + skipped + "<name>".len())
+}
+
+/// Écrit un nouveau nom dans le GPX (piste et métadonnées). Renvoie `true` si le fichier a changé.
+pub fn write_name_file(path: &Path, name: &str) -> Result<bool> {
+    rewrite(path, |xml| with_name(xml, name))
+}
+
+/// Réécrit un GPX par une modification textuelle, vérifiée : UTF-8, relecture
+/// possible, même nombre de points ; fichier temporaire puis renommage.
+fn rewrite(path: &Path, change: impl FnOnce(&str) -> std::result::Result<String, String>) -> Result<bool> {
     let io = |source| Error::Io { path: path.to_owned(), source };
     let fail = |message: String| Error::Gpx { path: path.to_owned(), message };
     let bytes = fs::read(path).map_err(io)?;
     let xml = String::from_utf8(bytes)
-        .map_err(|_| fail("encodage autre que UTF-8 : écriture des tags impossible".into()))?;
-    let new = with_meta(&xml, meta).map_err(|m| fail(m.to_string()))?;
+        .map_err(|_| fail("encodage autre que UTF-8 : écriture dans le GPX impossible".into()))?;
+    let new = change(&xml).map_err(fail)?;
     if new == xml {
         return Ok(false);
     }
@@ -154,6 +211,26 @@ fn unescape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn renommage() {
+        let x = "<gpx><metadata><name>Ancien</name></metadata><trk><name>Ancien</name><trkseg><trkpt lat=\"1\" lon=\"2\"><name>pt</name></trkpt></trkseg></trk></gpx>";
+        let y = with_name(x, "Boucle & Vexin").unwrap();
+        assert_eq!(
+            y,
+            "<gpx><metadata><name>Boucle &amp; Vexin</name></metadata><trk><name>Boucle &amp; Vexin</name><trkseg><trkpt lat=\"1\" lon=\"2\"><name>pt</name></trkpt></trkseg></trk></gpx>"
+        );
+        // Piste sans nom : il est ajouté ; le nom d'un point n'est pas touché.
+        let x = "<gpx><trk><trkseg><trkpt lat=\"1\" lon=\"2\"><name>pt</name></trkpt></trkseg></trk></gpx>";
+        assert_eq!(with_name(x, "Neuf").unwrap(), "<gpx><trk><name>Neuf</name><trkseg><trkpt lat=\"1\" lon=\"2\"><name>pt</name></trkpt></trkseg></trk></gpx>");
+        // Itinéraire (Openrunner, Komoot) et métadonnées sans nom.
+        let x = "<gpx><metadata><time>t</time></metadata><rte><name>A</name><rtept lat=\"1\" lon=\"2\"/></rte></gpx>";
+        assert_eq!(with_name(x, "B").unwrap(), "<gpx><metadata><time>t</time></metadata><rte><name>B</name><rtept lat=\"1\" lon=\"2\"/></rte></gpx>");
+        assert!(with_name(x, "  ").is_err());
+        // Métadonnées sans nom mais avec un auteur : l'auteur n'est pas touché.
+        let x = "<gpx><metadata>\n  <author><name>Jean</name></author></metadata><trk><name>A</name><trkseg/></trk></gpx>";
+        assert_eq!(with_name(x, "B").unwrap(), "<gpx><metadata>\n  <author><name>Jean</name></author></metadata><trk><name>B</name><trkseg/></trk></gpx>");
+    }
 
     const GPX11: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="test" xmlns="http://www.topografix.com/GPX/1/1">

@@ -5,12 +5,9 @@ import {
 
   IconBuildingBroadcastTower,
   IconBarbell,
-  IconCalendar,
   IconCopy,
-  IconDeviceWatch,
   IconFolder,
-  IconLink,
-  IconRefresh,
+  IconPlugConnected,
   IconRoute,
   IconSettings,
   IconTrash,
@@ -26,9 +23,10 @@ import CollectionsPage from './pages/CollectionsPage'
 import DuplicatesPage from './pages/DuplicatesPage'
 import TrashPage from './pages/TrashPage'
 import TourPage from './pages/TourPage'
-import KomootPage from './pages/KomootPage'
-import OpenrunnerPage from './pages/OpenrunnerPage'
+import ConnectionsPage, { type ConnectionTab } from './pages/ConnectionsPage'
 import WorkoutsPage from './pages/WorkoutsPage'
+import InboxPanel from './components/InboxPanel'
+import { APP_VERSION } from './version'
 
 export type Route =
   | { page: 'library'; filter?: TraceFilter }
@@ -40,18 +38,8 @@ export type Route =
   | { page: 'trash' }
   | { page: 'collection'; id: number }
   | { page: 'tour'; id: number }
-  | { page: 'komoot' }
-  | { page: 'openrunner' }
+  | { page: 'connections'; tab: ConnectionTab }
   | { page: 'workouts' }
-
-/** Fonctions prévues mais pas encore disponibles. */
-function Soon() {
-  return (
-    <Badge size="xs" variant="light" color="gray">
-      bientôt
-    </Badge>
-  )
-}
 
 export default function App() {
   // Historique des écrans visités (précédent / suivant), 50 au plus.
@@ -160,21 +148,12 @@ export default function App() {
               ) : undefined
             }
           />
-          <Text size="xs" fw={600} c="dimmed" tt="uppercase" px="sm" pt="md" pb={4}>
-            Sources
-          </Text>
-          <NavLink label="Komoot" leftSection={<IconRefresh size={18} />} active={route.page === 'komoot'} onClick={() => go({ page: 'komoot' })} />
           <NavLink
-            label="Openrunner"
-            leftSection={<IconLink size={18} />}
-            active={route.page === 'openrunner'}
-            onClick={() => go({ page: 'openrunner' })}
+            label="Connexions"
+            leftSection={<IconPlugConnected size={18} />}
+            active={route.page === 'connections'}
+            onClick={() => go({ page: 'connections', tab: 'komoot' })}
           />
-          <Text size="xs" fw={600} c="dimmed" tt="uppercase" px="sm" pt="md" pb={4}>
-            Connexions
-          </Text>
-          <NavLink label="Agenda Pédalons" leftSection={<IconCalendar size={18} />} rightSection={<Soon />} disabled />
-          <NavLink label="Appareils GPS" leftSection={<IconDeviceWatch size={18} />} rightSection={<Soon />} disabled />
           <NavLink
             mt="auto"
             label="Corbeille"
@@ -198,19 +177,26 @@ export default function App() {
           <Group gap={6} px="sm" pt={4}>
             <IconBuildingBroadcastTower size={12} color="#868e96" />
             <Text size="xs" c="dimmed">
-              v0.5.1{import.meta.env.DEV ? " (dev)" : ""}
+              {APP_VERSION}{import.meta.env.DEV ? " (dev)" : ""}
             </Text>
           </Group>
         </Stack>
       </AppShell.Navbar>
       <AppShell.Main>
+        {/* GPX arrivés dans le dossier surveillé (retour de gpx.studio…) ; la fiche a le sien. */}
+        {route.page === "library" && <InboxPanel onOpen={open} />}
         {route.page === 'library' && (
           <LibraryPage key={JSON.stringify(route.filter ?? {})} initialFilter={route.filter} onOpen={open} onSettings={() => go({ page: 'settings' })} />
         )}
-        {route.page === 'trace' && <TracePage id={route.id} onBack={() => go(route.back)} backLabel={backLabel(route.back)} />}
+        {route.page === "trace" && <TracePage id={route.id} onBack={() => go(route.back)} backLabel={backLabel(route.back)} onOpen={open} />}
         {route.page === 'settings' && <SettingsPage />}
-        {route.page === 'komoot' && <KomootPage onLibrary={() => go({ page: 'library' })} />}
-        {route.page === 'openrunner' && <OpenrunnerPage onLibrary={() => go({ page: 'library' })} />}
+        {route.page === 'connections' && (
+          <ConnectionsPage
+            tab={route.tab}
+            onTab={(tab) => setNav((n) => ({ ...n, stack: n.stack.map((r, i) => (i === n.i ? { page: 'connections', tab } : r)) }))}
+            onLibrary={() => go({ page: 'library' })}
+          />
+        )}
         {route.page === 'workouts' && <WorkoutsPage />}
         {route.page === 'trash' && (
           // Trace restaurée : elle est de retour dans la Bibliothèque, on l’ouvre depuis là.

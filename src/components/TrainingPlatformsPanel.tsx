@@ -13,7 +13,7 @@ export function savedZwiftFolder(): string | null {
 }
 
 /**
- * Réglages → Plateformes d'entraînement : dossier Zwift (copie des .zwo) et
+ * Connexions → Entraînement : dossier Zwift (copie des .zwo) et
  * compte intervals.icu (clé d'API personnelle).
  */
 export default function TrainingPlatformsPanel() {

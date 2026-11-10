@@ -83,7 +83,7 @@ export default function TagsPage({ onOpenTag }: { onOpenTag: (tag: string) => vo
         </Text>
       )}
       {warnings.length > 0 && (
-        <Paper withBorder p="sm" bg="orange.0">
+        <Paper withBorder p="sm" bg="var(--mantine-color-orange-light)">
           <Text size="sm" fw={600}>
             Index à jour, mais {warnings.length} fichier(s) GPX n'ont pas pu être réécrits :
           </Text>
@@ -192,7 +192,7 @@ export default function TagsPage({ onOpenTag }: { onOpenTag: (tag: string) => vo
         <Stack gap="sm">
           <TextInput label="Nouveau nom" value={newName} onChange={(e) => setNewName(e.currentTarget.value)} data-autofocus />
           {target && (
-            <Text size="sm" c="orange.8">
+            <Text size="sm" c="var(--mantine-color-orange-light-color)">
               Le tag « {target.tag} » existe déjà : les deux seront fusionnés ({(editing?.count ?? 0) + target.count} traces au plus).
             </Text>
           )}

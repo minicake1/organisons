@@ -1,14 +1,32 @@
 import { useEffect, useState } from 'react'
-import { ActionIcon, Badge, Button, Checkbox, Code, Group, Paper, Radio, Stack, Switch, Text, TextInput, Title, Tooltip } from '@mantine/core'
+import {
+  ActionIcon,
+  Badge,
+  Button,
+  Checkbox,
+  Code,
+  Group,
+  Paper,
+  Radio,
+  SegmentedControl,
+  Stack,
+  Switch,
+  Text,
+  TextInput,
+  Title,
+  Tooltip,
+  useMantineColorScheme,
+  type MantineColorScheme,
+} from '@mantine/core'
 import { IconFolderPlus, IconTrash } from '@tabler/icons-react'
 import { open } from '@tauri-apps/plugin-dialog'
 import { api, type Library, type ScanReport } from '../api'
 import ManagedActions, { type ActionResult } from '../components/ManagedActions'
 import PatternEditor from '../components/PatternEditor'
-import HammerheadPanel from '../components/HammerheadPanel'
-import TrainingPlatformsPanel from '../components/TrainingPlatformsPanel'
+import CreditsPanel from '../components/CreditsPanel'
 
 export default function SettingsPage() {
+  const { colorScheme, setColorScheme } = useMantineColorScheme()
   const [libraries, setLibraries] = useState<Library[]>([])
   const [name, setName] = useState('')
   const [mode, setMode] = useState<Library['mode']>('index')
@@ -50,10 +68,29 @@ export default function SettingsPage() {
 
   return (
     <Stack gap="md" maw={960}>
+      <Title order={2}>Apparence</Title>
+      <Paper withBorder radius="md" p="md">
+        <Group>
+          <Text fw={600}>Thème</Text>
+          <SegmentedControl
+            value={colorScheme}
+            onChange={(v) => setColorScheme(v as MantineColorScheme)}
+            data={[
+              { value: 'light', label: 'Clair' },
+              { value: 'dark', label: 'Sombre' },
+              { value: 'auto', label: 'Comme Windows' },
+            ]}
+          />
+        </Group>
+        <Text size="xs" c="dimmed" mt={6}>
+          Les fonds de carte restent clairs, pour que les traces colorées restent lisibles.
+        </Text>
+      </Paper>
+
       <Title order={2}>Stockage</Title>
 
       <Paper withBorder radius="md">
-        <Group p="md" style={{ borderBottom: '1px solid #e9ecef' }}>
+        <Group p="md" style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}>
           <Text fw={600}>Bibliothèques</Text>
         </Group>
         {libraries.length === 0 && (
@@ -62,7 +99,7 @@ export default function SettingsPage() {
           </Text>
         )}
         {libraries.map((l) => (
-          <Stack key={l.id} gap="xs" p="md" style={{ borderBottom: '1px solid #f1f3f5' }}>
+          <Stack key={l.id} gap="xs" p="md" style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}>
             <Group wrap="nowrap" align="flex-start">
               <Stack gap={4} style={{ flex: 1, minWidth: 0 }}>
                 <Group gap="xs">
@@ -156,10 +193,8 @@ export default function SettingsPage() {
       </Paper>
 
 
-      <Title order={2} mt="md">Appareils</Title>
-      <HammerheadPanel />
-      <Title order={2} mt="md">Plateformes d’entraînement</Title>
-      <TrainingPlatformsPanel />
+      <Title order={2} mt="md">À propos et crédits</Title>
+      <CreditsPanel />
     </Stack>
   )
 }

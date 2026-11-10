@@ -5,6 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::{Emitter, Manager, State};
 
+mod gpxstudio;
 mod hammerhead;
 mod http;
 mod komoot;
@@ -779,6 +780,90 @@ fn setting_days(index: &Index, key: &str) -> u32 {
     index.setting(key).ok().flatten().and_then(|v| v.parse().ok()).unwrap_or(0)
 }
 
+/// Renomme une trace (`null` : nom du fichier GPX), puis le fichier lui-même
+/// (rangé selon le modèle dans une bibliothèque gérée, renommé sur place dans
+/// une bibliothèque indexée qui autorise l'écriture). Renvoie le nouveau chemin
+/// du fichier, s'il a changé.
+#[tauri::command]
+async fn rename_trace(app: tauri::AppHandle, id: i64, name: Option<String>) -> CmdResult<Option<String>> {
+    blocking(move || {
+        let state = app.state::<AppState>();
+        let index = state.index.lock().map_err(err)?;
+        traces_core::scan::rename_trace(&index, id, name.as_deref())
+            .map_err(|e| format!("Nom enregistré dans l'appli, mais pas dans le fichier GPX : {e}"))?;
+        organize::rename_file(&index, id).map_err(|e| format!("Trace renommée, mais pas son fichier : {e}"))
+    })
+    .await
+}
+
+// ---- gpx.studio et dossier surveillé ---------------------------------------
+
+/// Adresse gpx.studio qui ouvre la trace (servie en local quelques minutes).
+#[tauri::command]
+async fn gpxstudio_open(app: tauri::AppHandle, id: i64) -> CmdResult<String> {
+    blocking(move || gpxstudio::open(&*app.state::<AppState>().index.lock().map_err(err)?, id, now())).await
+}
+
+fn downloads(app: &tauri::AppHandle) -> std::path::PathBuf {
+    app.path().download_dir().unwrap_or_default()
+}
+
+/// GPX arrivés dans le dossier surveillé (Téléchargements par défaut).
+#[tauri::command]
+async fn inbox_list(app: tauri::AppHandle) -> CmdResult<gpxstudio::Inbox> {
+    blocking(move || {
+        let dir = downloads(&app);
+        gpxstudio::list(&app.state::<AppState>().index, &dir, now())
+    })
+    .await
+}
+
+#[tauri::command]
+fn inbox_dir(app: tauri::AppHandle, state: State<AppState>) -> CmdResult<String> {
+    Ok(gpxstudio::dir(&*state.index.lock().map_err(err)?, &downloads(&app)))
+}
+
+#[tauri::command]
+fn inbox_set_dir(state: State<AppState>, dir: String) -> CmdResult<()> {
+    gpxstudio::set_dir(&*state.index.lock().map_err(err)?, dir.trim())
+}
+
+/// Ne plus proposer ces fichiers.
+#[tauri::command]
+fn inbox_dismiss(state: State<AppState>, paths: Vec<String>) -> CmdResult<()> {
+    gpxstudio::mark_done(&*state.index.lock().map_err(err)?, &paths)
+}
+
+/// Remplace le GPX d'une trace par la version du dossier surveillé (l'ancienne part à la corbeille).
+#[tauri::command]
+async fn inbox_replace(app: tauri::AppHandle, path: String, trace_id: i64) -> CmdResult<()> {
+    blocking(move || {
+        let state = app.state::<AppState>();
+        let mut index = state.index.lock().map_err(err)?;
+        organize::replace_trace_file(&mut index, trace_id, std::path::Path::new(&path), now()).map_err(err)?;
+        gpxstudio::close_session(&index, trace_id)?;
+        gpxstudio::mark_done(&index, &[path])
+    })
+    .await
+}
+
+/// Ajoute des GPX du dossier surveillé à une bibliothèque gérée (copiés à leur place).
+#[tauri::command]
+async fn inbox_import(app: tauri::AppHandle, paths: Vec<String>, library_id: i64) -> CmdResult<OrganizeReport> {
+    blocking(move || {
+        let state = app.state::<AppState>();
+        let mut index = state.index.lock().map_err(err)?;
+        let lib = index.library(library_id).map_err(err)?;
+        if lib.mode != "managed" {
+            return Err(format!("« {} » n'est pas une bibliothèque gérée : Organisons n'y copie pas de fichiers.", lib.name));
+        }
+        let report = organize::import_files(&mut index, &lib, &paths, now()).map_err(err)?;
+        gpxstudio::mark_done(&index, &paths)?;
+        Ok(report)
+    })
+    .await
+}
+
 /// Met une trace à la corbeille d’Organisons (son GPX reste récupérable jusqu’au vidage).
 #[tauri::command]
 fn trash_trace(state: State<AppState>, id: i64) -> CmdResult<String> {
@@ -900,6 +985,14 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_libraries,
+            gpxstudio_open,
+            rename_trace,
+            inbox_list,
+            inbox_dir,
+            inbox_set_dir,
+            inbox_dismiss,
+            inbox_replace,
+            inbox_import,
             add_library,
             remove_library,
             set_library_write_gpx,

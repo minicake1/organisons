@@ -203,6 +203,7 @@ impl Index {
             ("libraries", "write_gpx", "INTEGER NOT NULL DEFAULT 0"),
             ("traces", "sport", "TEXT NOT NULL DEFAULT 'Vélo'"),
             ("traces", "sport_user", "TEXT"),
+            ("traces", "name_user", "TEXT"),
             ("traces", "gpx_date", "INTEGER"),
             ("traces", "tag_suggestions", "TEXT NOT NULL DEFAULT '[]'"),
             ("traces", "tags_ignored", "TEXT NOT NULL DEFAULT '[]'"),
@@ -559,6 +560,21 @@ impl Index {
         Ok(())
     }
 
+    /// Nom choisi par l'utilisateur : il reste en place aux relectures du GPX
+    /// (`None` : retour au nom lu dans le fichier, `file_name`).
+    pub fn set_name(&self, id: i64, name: Option<&str>, file_name: &str) -> Result<()> {
+        match name.map(str::trim).filter(|n| !n.is_empty()) {
+            Some(n) => self.conn.execute("UPDATE traces SET name_user = ?2, name = ?2 WHERE id = ?1", params![id, n])?,
+            None => self.conn.execute("UPDATE traces SET name_user = NULL, name = ?2 WHERE id = ?1", params![id, file_name])?,
+        };
+        Ok(())
+    }
+
+    /// La trace a-t-elle un nom choisi par l'utilisateur ?
+    pub fn has_user_name(&self, id: i64) -> Result<bool> {
+        Ok(self.conn.query_row("SELECT name_user IS NOT NULL FROM traces WHERE id = ?1", [id], |r| r.get(0))?)
+    }
+
     pub fn set_sport(&self, id: i64, sport: Option<&str>) -> Result<()> {
         self.conn.execute("UPDATE traces SET sport_user = ?2 WHERE id = ?1", params![id, sport])?;
         Ok(())
@@ -632,7 +648,7 @@ impl Index {
         ];
         let id = if let Some(id) = existing {
             tx.execute(
-                "UPDATE traces SET library_id=?1, path=?2, file_hash=?3, file_size=?4, file_mtime=?5, name=?6,
+                "UPDATE traces SET library_id=?1, path=?2, file_hash=?3, file_size=?4, file_mtime=?5, name=COALESCE(name_user, ?6),
                  distance_km=?7, elevation_gain=?8, elevation_loss=?9, ele_min=?10, ele_max=?11, hilliness=?12,
                  wind=?13, source=?14, start_lat=?15, start_lon=?16, bbox_json=?17, point_count=?18, has_time=?19,
                  creator=?20, preview_json=?21, profile_json=?22, sport=?23, gpx_date=?24 WHERE id = ?25",
@@ -1031,6 +1047,17 @@ pub(crate) fn similar_routes(a: &RouteKey, b: &RouteKey) -> bool {
 
 impl Index {
     /// Noms des traces dont le fichier a cette empreinte.
+    /// Noms des traces par empreinte de fichier, pour toutes les traces.
+    pub fn names_by_hash_all(&self) -> Result<std::collections::HashMap<String, Vec<String>>> {
+        let mut st = self.conn.prepare("SELECT file_hash, name FROM traces ORDER BY name")?;
+        let mut out: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+        for row in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+            let (h, n) = row?;
+            out.entry(h).or_default().push(n);
+        }
+        Ok(out)
+    }
+
     pub fn names_by_hash(&self, hash: &str) -> Result<Vec<String>> {
         let mut st = self.conn.prepare("SELECT name FROM traces WHERE file_hash = ?1 ORDER BY name")?;
         let names = st.query_map([hash], |r| r.get(0))?.collect::<std::result::Result<Vec<String>, _>>()?;

@@ -71,7 +71,7 @@ export default function TrashPage({ onOpen, onChanged }: { onOpen: (id: number) 
         </Text>
       )}
       {restored && (
-        <Paper withBorder p="sm" bg="teal.0" c="teal.9">
+        <Paper withBorder p="sm" bg="var(--mantine-color-teal-light)" c="var(--mantine-color-teal-light-color)">
           <Group gap="xs">
             <Text size="sm">
               « {restored.name} » est de retour dans sa bibliothèque (à sa racine : « Ranger » la remettra à sa place).

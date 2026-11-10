@@ -64,7 +64,7 @@ export default function DuplicatesPage({ onOpen, onChanged }: { onOpen: (id: num
         </Text>
       )}
       {done && (
-        <Text c="teal.8" size="sm">
+        <Text c="var(--mantine-color-teal-light-color)" size="sm">
           {done}
         </Text>
       )}
@@ -104,7 +104,7 @@ export default function DuplicatesPage({ onOpen, onChanged }: { onOpen: (id: num
       </Paper>
 
       {sets.length > 0 && (
-        <Paper withBorder p="xs" radius="md" bg="blue.0" style={{ position: 'sticky', top: 0, zIndex: 5 }}>
+        <Paper withBorder p="xs" radius="md" bg="var(--mantine-color-blue-light)" style={{ position: 'sticky', top: 0, zIndex: 5 }}>
           <Group gap="sm">
             <Text size="sm" fw={600}>
               {picked.length} groupe(s) sur {sets.length}
@@ -167,7 +167,7 @@ export default function DuplicatesPage({ onOpen, onChanged }: { onOpen: (id: num
       )}
       {sets.map((s) => (
         <Paper key={s.traces.map((t) => t.id).join('-')} withBorder radius="md">
-          <Group p="sm" gap="xs" style={{ borderBottom: '1px solid #f1f3f5' }}>
+          <Group p="sm" gap="xs" style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}>
             <Checkbox
               aria-label="Sélectionner ce groupe"
               checked={picked.includes(groupKey(s))}

@@ -92,15 +92,15 @@ export default function WorkoutSendMenu({
             <Menu.Dropdown>
               <Menu.Item disabled={!karoo} onClick={toKaroo}>
                 {sentToKaroo ? 'Karoo : mettre à jour' : 'Karoo (Hammerhead)'}
-                {!karoo && <Text size="xs" c="dimmed">À connecter dans Réglages → Appareils</Text>}
+                {!karoo && <Text size="xs" c="dimmed">À connecter dans Connexions → Karoo</Text>}
               </Menu.Item>
               <Menu.Item disabled={!zwift} onClick={toZwift}>
                 Zwift
-                {!zwift && <Text size="xs" c="dimmed">Dossier Zwift introuvable (Réglages)</Text>}
+                {!zwift && <Text size="xs" c="dimmed">Dossier Zwift introuvable (Connexions → Entraînement)</Text>}
               </Menu.Item>
               <Menu.Item disabled={!icu} onClick={() => setPlanOpen(true)}>
                 intervals.icu : planifier…
-                {!icu && <Text size="xs" c="dimmed">À connecter dans Réglages</Text>}
+                {!icu && <Text size="xs" c="dimmed">À connecter dans Connexions → Entraînement</Text>}
               </Menu.Item>
               <Menu.Item onClick={toMyWhoosh}>
                 MyWhoosh (Workout Builder)

@@ -1,9 +1,14 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { readFileSync } from 'node:fs'
+
+// Numéro de version affiché dans l’appli (pied de page, crédits), lu dans package.json.
+const version: string = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version
 
 // Configuration attendue par Tauri : port fixe, pas d'écran effacé.
 export default defineConfig({
   plugins: [react()],
+  define: { __APP_VERSION__: JSON.stringify(version) },
   clearScreen: false,
   server: {
     port: 5173,

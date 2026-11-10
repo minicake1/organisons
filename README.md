@@ -1,4 +1,4 @@
-# Organisons, v0.5.1
+# Organisons, v0.6
 
 Application de bureau pour classer, filtrer et préparer ses traces GPX vélo, sur son PC et son NAS, dans l'esprit de Pédalons.
 Tauri 2 (cœur en Rust), React, Mantine et MapLibre. Interface en français, pour Windows (macOS prévu plus tard).
@@ -31,7 +31,10 @@ Tauri 2 (cœur en Rust), React, Mantine et MapLibre. Interface en français, pou
 - **Revêtement** calculé depuis OpenStreetMap (tuiles vectorielles VersaTiles) : asphalte, pavés, stabilisé, chemin. Le profil et la carte sont colorés, avec la part de chaque type en km et en %.
 - Au survol d'une légende (pente ou revêtement), le type ressort et les autres s'atténuent.
 - Points d'intérêt affichés par catégorie (repliables) ou par km.
+- **Renommer la trace** (crayon à côté du titre) : le nom reste en place aux relectures. Le fichier est renommé tout de suite : rangé selon le modèle dans une bibliothèque gérée, renommé dans son dossier dans une bibliothèque indexée qui autorise l’écriture ; le `<name>` du GPX change aussi dans ce cas. « Nom du fichier » reprend le nom écrit dans le GPX.
 - Classement en lecture ou en édition : sport, tags, collections, notes.
+- **Modifier dans gpx.studio** : la trace s'ouvre dans gpx.studio, dans le navigateur. Une fois exportée, Organisons propose de remplacer la trace (voir Connexions).
+- **Envoyer vers le Karoo** (Hammerhead), aussi pour une sélection de traces ou un tour.
 
 ### Tags
 
@@ -49,11 +52,32 @@ Tauri 2 (cœur en Rust), React, Mantine et MapLibre. Interface en français, pou
   - ordre changé en glissant les étapes ;
   - export en un seul GPX (une piste par étape) ou étape par étape.
 
+### Entraînements
+
+- Séances structurées au format Zwift (`.zwo`) : lues dans les bibliothèques, ou importées dans le dossier « Entraînements » d'une bibliothèque gérée.
+- Graphique de puissance par zone, durée, IF et TSS selon ta FTP.
+- Envoi vers le Karoo, Zwift (copie dans son dossier), intervals.icu (planifiée à une date) ou MyWhoosh (ouverture de son Workout Builder).
+
+### Connexions
+
+Tous les services reliés sont dans l'onglet **Connexions** :
+
+- **Komoot** : connexion au compte, liste des parcours planifiés et réalisés, import en lot avec avancement. Le mot de passe n'est pas conservé ; le jeton d'accès est rangé dans le gestionnaire d'identifiants de Windows. Komoot n'a pas d'API publique : Organisons passe par l'API de son site, qui peut changer sans prévenir.
+- **Openrunner** : coller les liens des parcours publics. Ils sont téléchargés avec leurs points d'intérêt. Un parcours privé doit être exporté depuis le site.
+- **Karoo (Hammerhead)** : connexion au compte par le navigateur (API officielle), puis envoi des traces, avec leurs points d'intérêt, et des séances. Le Karoo les récupère à sa synchronisation.
+  - La version publique n'intègre pas d'application Hammerhead : chacun crée la sienne, gratuitement, sur le Dashboard Hammerhead. La marche à suivre est dans l'onglet.
+- **Entraînement** : dossier Zwift (trouvé tout seul, OneDrive compris) et compte intervals.icu (clé d'API personnelle).
+- **gpx.studio** : dossier surveillé, Téléchargements par défaut.
+  - « Modifier dans gpx.studio » sert la trace sur une adresse locale, réservée à gpx.studio pendant 15 minutes.
+  - Le GPX exporté arrive dans le dossier surveillé, et Organisons propose de **remplacer la trace** : tags, notes et collections sont gardés, et l'ancienne version va dans la Corbeille. On peut aussi l'**ajouter** comme nouvelle trace, ou l'**ignorer**.
+  - Tout GPX déposé dans ce dossier, quelle que soit sa provenance, est proposé de la même façon.
+
+Les autres appareils GPS sont à l’étude.
+
 ### Imports
 
 - **Fichiers GPX** dans une bibliothèque gérée : copiés directement à leur place. Les doublons sont détectés avant la copie.
-- **Komoot** : connexion au compte, liste des parcours planifiés et réalisés, import en lot avec avancement. Le mot de passe n'est pas conservé ; le jeton d'accès est rangé dans le gestionnaire d'identifiants de Windows. Komoot n'a pas d'API publique : Organisons passe par l'API de son site, qui peut changer sans prévenir.
-- **Openrunner** : coller les liens des parcours publics. Ils sont téléchargés avec leurs points d'intérêt. Un parcours privé doit être exporté depuis le site.
+- Komoot, Openrunner et le dossier surveillé : voir Connexions.
 - Un parcours déjà présent dans la bibliothèque (même fichier ou même parcours) n'est pas importé une seconde fois.
 
 ### Doublons et corbeille
@@ -65,15 +89,16 @@ Tauri 2 (cœur en Rust), React, Mantine et MapLibre. Interface en français, pou
   - L'onglet Corbeille liste les traces supprimées et les doublons mis de côté, restaurables un par un.
   - Vidage manuel, ou automatique après 7, 14 ou 30 jours.
 
-### Navigation
+### Navigation et apparence
 
 - Alt+← et Alt+→, ou les boutons latéraux de la souris, pour revenir à l'écran précédent ou suivant.
+- **Thème clair, sombre ou comme Windows** (Réglages → Apparence). Le thème sombre reprend les couleurs du thème sombre de Vivaldi. Les fonds de carte restent clairs.
 
 ## Installer
 
 ### Avec l'installateur (Windows)
 
-Lancer `Organisons_<version>_x64_fr-FR.msi` ou `Organisons_<version>_x64-setup.exe`, produits par `npm run tauri build` dans `target/release/bundle/`. L'appli s'installe dans `C:\Program Files\Organisons`. Elle utilise WebView2, déjà présent sur Windows 11.
+Lancer `Organisons_<version>_x64_fr-FR.msi` ou `Organisons_<version>_x64-setup.exe`. L'appli s'installe dans `C:\Program Files\Organisons`. Elle utilise WebView2, déjà présent sur Windows 11.
 
 ### Depuis les sources
 
@@ -87,65 +112,90 @@ Lancer `Organisons_<version>_x64_fr-FR.msi` ou `Organisons_<version>_x64-setup.e
 ```bash
 npm install
 npm run tauri dev      # appli en développement
-npm run tauri build    # installateurs .msi et .exe dans target/release/bundle
+npm run build:public   # installateurs .msi et .exe à diffuser, dans target/release/bundle
 ```
 
 Au premier lancement, ajoute un dossier de GPX dans **Réglages**.
+
+#### Application Hammerhead intégrée (facultatif, usage personnel)
+
+Comme Pédalons, Organisons peut intégrer une application Hammerhead, pour que « Connecter mon compte » suffise. Ses identifiants se mettent dans `src-tauri/hammerhead.local.env`, jamais versionné :
+
+```
+HAMMERHEAD_CLIENT_ID=…
+HAMMERHEAD_CLIENT_SECRET=…
+HAMMERHEAD_REDIRECT_URI=http://localhost:3001
+```
+
+`npm run tauri build` les intègre alors à l'exécutable, où ils sont lisibles : **ces installateurs ne doivent pas être diffusés**. Pour diffuser, utiliser `npm run build:public`. Il ignore ce fichier, puis vérifie qu'aucun de ces identifiants ne se trouve dans l'exécutable ni dans les installateurs.
 
 ## Données et sécurité des fichiers
 
 - L'index est dans `%APPDATA%\fr.organisons.app\index.sqlite`. La version de développement utilise `index-dev.sqlite`, une copie faite au premier lancement. Supprimer l'index remet l'appli à zéro ; les tags et notes écrits dans les GPX reviennent à la relecture.
 - Tes fichiers GPX ne sont modifiés ou déplacés que si tu l'as demandé :
-  - écriture des tags et notes (option par bibliothèque) ;
-  - rangement validé dans l'aperçu ;
+  - écriture des tags, des notes et du nom choisi (option par bibliothèque) ;
+  - rangement validé dans l’aperçu, ou renommage d’une trace (son fichier suit) ;
+  - remplacement par une version modifiée dans gpx.studio, l'ancienne allant dans la Corbeille ;
   - doublon mis de côté ou trace mise à la corbeille, ce qui reste récupérable jusqu'au vidage.
+- Les fichiers du dossier surveillé (Téléchargements) ne sont jamais modifiés ni supprimés.
 - Rien n'est supprimé définitivement sans confirmation, sauf par le vidage automatique, si on l'a activé.
+- Les mots de passe ne sont pas conservés. Les jetons et clés (Komoot, Hammerhead, intervals.icu) sont rangés dans le gestionnaire d'identifiants de Windows.
 
 ## Organisation du code
 
 ```
 crates/traces-core/     cœur Rust sans interface, testé seul
   src/analyze.rs        distance, dénivelé, pente, vent, POI, profil
-  src/index.rs          base SQLite : traces, tags, collections, tours, doublons, réglages
+  src/index.rs          base SQLite : traces, tags, collections, tours, doublons, entraînements, réglages
   src/scan.rs           parcours des dossiers, empreinte SHA-256, tags et notes relus dans le GPX
   src/gpxmeta.rs        écriture des tags et notes dans <extensions>, fichier inchangé par ailleurs
-  src/organize.rs       rangement, import, doublons mis de côté, corbeille
+  src/organize.rs       rangement, import, remplacement, doublons mis de côté, corbeille
   src/naming.rs         nom nettoyé, date du titre, identifiant Openrunner
   src/autotags.rs       tags proposés
   src/sport.rs          sport d'après le GPX ou le titre
   src/surface.rs        revêtement depuis les voies OpenStreetMap
   src/tour.rs           export des tours
+  src/workout.rs        séances .zwo
+  src/device.rs         GPX préparé pour un appareil
   tests/brm600.rs       tests sur un vrai fichier (BRM 600 Tour de Manche, Openrunner)
-src-tauri/src/          application Tauri : commandes, Komoot (komoot.rs), Openrunner (openrunner.rs)
+src-tauri/src/          application Tauri : commandes (lib.rs), Komoot, Openrunner, Hammerhead,
+                        Zwift et intervals.icu (training.rs), gpx.studio et dossier surveillé,
+                        client HTTP commun
 src/                    interface React : pages Bibliothèque, Fiche, Tour, Collections, Tags,
-                        Doublons, Corbeille, Komoot, Openrunner, Réglages
+                        Doublons, Entraînements, Connexions, Corbeille, Réglages
+scripts/build-public.mjs  installateurs à diffuser, vérifiés sans secret
 ```
 
-Les notes de développement (règles de conception, choix validés par version, pièges connus) sont dans [organisons.md](organisons.md).
+Les notes de développement (règles de conception, choix validés par version, pièges connus, feuille de route détaillée) sont dans [organisons.md](organisons.md).
 
 ## Tests
 
 ```bash
-cargo test -p traces-core          # cœur : analyse, index, rangement, tours, corbeille…
+cargo test -p traces-core          # cœur : analyse, index, rangement, tours, corbeille, remplacement…
 npm run build                      # vérification des types et build de l'interface
 cargo run -p traces-core --example indexer -- "D:\GPX"   # indexer un dossier sans interface
 ```
 
 ## Feuille de route
 
-- **v0.5** : envoi vers les appareils GPS (Garmin, Wahoo, copie USB vers un Edge), entraînements avec les fichiers `.zwo`.
-- **Plus tard** : version macOS, agenda Pédalons.
+- **Autres appareils GPS** : à l’étude.
+- **Plus tard** : version macOS, éditeur intégré, agenda Pédalons, fonds de carte sombres.
 
-## Inspirations
+## Crédits
 
-Organisons est un projet indépendant, écrit de zéro. Il ne reprend pas le code des projets ci-dessous, seulement des idées et des règles de calcul.
+Organisons v0.6, sous licence [GNU AGPL v3 ou ultérieure](LICENSE). Code source : [github.com/minicake1/organisons](https://github.com/minicake1/organisons). Les mêmes crédits sont dans l'appli, Réglages → À propos et crédits.
 
-- [Pédalons](https://github.com/glandais/pedalons) (Gabriel Landais, PolyForm Noncommercial 1.0.0) : seuils de relief, filtres de la bibliothèque, et l'idée de lire le revêtement dans les tuiles vectorielles OpenStreetMap au schéma Shortbread.
-- [biketeam](https://github.com/tomacla/biketeam) (tomacla) : méthode du vent idéal, reprise de gpx2web.
+### Données cartographiques
 
-Si du code de Pédalons est un jour repris, il faudra le signaler ici et conserver sa mention de copyright. Pédalons est sous PolyForm Noncommercial, qui n'est pas compatible avec l'AGPL : il faudrait l'accord de son auteur.
+© [contributeurs OpenStreetMap](https://www.openstreetmap.org/copyright) (ODbL) ; fonds de carte [OpenFreeMap](https://openfreemap.org) (© OpenMapTiles) ; tuiles du revêtement [VersaTiles](https://versatiles.org).
 
-Données cartographiques : © contributeurs OpenStreetMap ; fonds de carte OpenFreeMap ; tuiles du revêtement VersaTiles.
+### Services reliés
+
+[gpx.studio](https://gpx.studio) (éditeur open source, licence MIT), Komoot, Openrunner, Hammerhead, Zwift, intervals.icu et MyWhoosh. Ces noms et marques appartiennent à leurs propriétaires ; Organisons n'est affilié à aucun d'eux. Komoot est utilisé par son API interne, non officielle.
+
+### Logiciels libres utilisés
+
+[Tauri](https://tauri.app), Rust, [React](https://react.dev), [Mantine](https://mantine.dev), [MapLibre GL JS](https://maplibre.org), [Tabler Icons](https://tabler.io/icons), SQLite (rusqlite), gpx, roxmltree, ureq, keyring, @mapbox/vector-tile et pbf, ainsi que leurs dépendances, chacun sous sa propre licence.
 
 ## Licence
 

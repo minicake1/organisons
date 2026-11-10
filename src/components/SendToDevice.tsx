@@ -27,7 +27,7 @@ export default function SendToDevice({ traceId, onMessage }: { traceId: number; 
 
   if (!connected) {
     return (
-      <Tooltip label="Connecte ton compte Hammerhead dans Réglages → Appareils (Garmin et Wahoo : plus tard)">
+      <Tooltip label="Connecte ton compte Hammerhead dans Connexions → Karoo (autres appareils : à l’étude)">
         <Button variant="default" leftSection={<IconDeviceWatch size={16} />} data-disabled onClick={(e) => e.preventDefault()}>
           Envoyer vers l'appareil
         </Button>

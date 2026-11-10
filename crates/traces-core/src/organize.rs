@@ -196,6 +196,37 @@ pub fn apply(index: &Index, library: &Library, moves: &[PlannedMove]) -> Result<
     Ok(report)
 }
 
+/// Après un renommage, le fichier prend aussi le nom de la trace, tout de suite :
+/// - bibliothèque gérée : rangé selon son modèle (comme « Ranger », pour cette trace seulement) ;
+/// - bibliothèque indexée qui autorise l'écriture : renommé dans son dossier ;
+/// - sinon, le fichier ne bouge pas.
+///
+/// Renvoie le nouveau chemin, ou `None` si le fichier est resté en place.
+pub fn rename_file(index: &Index, trace_id: i64) -> Result<Option<String>> {
+    let (library, path, _, _) = index.trace_file(trace_id)?;
+    let from = PathBuf::from(&path);
+    let moved = if library.mode == "managed" {
+        plan(index, &library)?.into_iter().find(|m| m.trace_id == trace_id)
+    } else if library.write_gpx {
+        let name = index.get(trace_id)?.summary.name;
+        let wanted = from.with_file_name(format!("{}.gpx", sanitize(&name)));
+        if key(&wanted) == key(&from) {
+            None
+        } else {
+            let to = unique(wanted, &HashSet::new());
+            Some(PlannedMove { trace_id, name, from: path.clone(), to: to.to_string_lossy().to_string() })
+        }
+    } else {
+        None
+    };
+    let Some(m) = moved else { return Ok(None) };
+    let report = apply(index, &library, std::slice::from_ref(&m))?;
+    match report.errors.into_iter().next() {
+        Some(e) => Err(crate::Error::Invalid(e)),
+        None => Ok(Some(m.to)),
+    }
+}
+
 /// Supprime les dossiers devenus vides, en remontant jusqu'à la racine (exclue).
 fn remove_empty_dirs(mut dir: Option<&Path>, root: &Path) {
     while let Some(d) = dir {
@@ -336,6 +367,48 @@ fn move_aside(index: &Index, trace_id: i64, now: i64, dir_name: &str) -> Result<
     Ok(to.to_string_lossy().to_string())
 }
 
+/// Remplace le GPX d'une trace par une version modifiée (gpx.studio…), en
+/// gardant la trace (tags, notes, collections, tours) :
+/// - l'ancien fichier est d'abord copié dans la corbeille d'Organisons ;
+/// - la nouvelle version, vérifiée, prend sa place (même chemin) ;
+/// - la trace est réanalysée et ses tags et notes réécrits dans le fichier.
+///
+/// Refusé si la bibliothèque n'autorise pas l'écriture dans les GPX, ou si
+/// elle est injoignable. Le fichier `new_file` n'est pas touché.
+pub fn replace_trace_file(index: &mut Index, trace_id: i64, new_file: &Path, now: i64) -> Result<()> {
+    let (library, path, tags, notes) = index.trace_file(trace_id)?;
+    if !library.write_gpx {
+        return Err(crate::Error::Invalid(format!(
+            "La bibliothèque « {} » n'autorise pas la modification des GPX (Réglages) : ajoute plutôt la version modifiée comme nouvelle trace.",
+            library.name
+        )));
+    }
+    let root = PathBuf::from(&library.path);
+    if !root.is_dir() {
+        return Err(crate::Error::Invalid(format!("{} : dossier injoignable ({})", library.name, library.path)));
+    }
+    // La nouvelle version doit être un GPX lisible avant de toucher à quoi que ce soit.
+    analyze_file(new_file)?;
+    let target = PathBuf::from(&path);
+    let base = target.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_else(|| "trace.gpx".into());
+    let trash = root.join(TRASH_DIR);
+    fs::create_dir_all(&trash).map_err(|source| crate::Error::Io { path: trash.clone(), source })?;
+    let kept = unique(trash.join(format!("{} {base}", ymd(now))), &HashSet::new());
+    fs::copy(&target, &kept).map_err(|source| crate::Error::Io { path: target.clone(), source })?;
+    // Copie à côté puis remplacement : jamais de fichier à moitié écrit à la place de l'original.
+    let tmp = target.with_extension("gpx.organisons-tmp");
+    fs::copy(new_file, &tmp).map_err(|source| crate::Error::Io { path: tmp.clone(), source })?;
+    if let Err(source) = fs::rename(&tmp, &target) {
+        let _ = fs::remove_file(&tmp);
+        return Err(crate::Error::Io { path: target, source });
+    }
+    scan::index_file(index, &library, &target, &path, now)?;
+    index.set_tags(trace_id, &tags)?;
+    index.set_notes(trace_id, &notes)?;
+    scan::write_trace_meta(index, trace_id)?;
+    Ok(())
+}
+
 /// Copie des GPX dans une bibliothèque gérée, directement à leur place, puis
 /// les indexe. Les fichiers d'origine ne sont pas touchés.
 pub fn import_files(index: &mut Index, library: &Library, files: &[String], now: i64) -> Result<OrganizeReport> {
@@ -425,11 +498,8 @@ fn quick_name(path: &Path) -> Option<String> {
         let raw = raw.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&");
         (!raw.trim().is_empty()).then(|| crate::naming::clean_name(&raw))
     };
-    let in_metadata = || {
-        let m = text.find("<metadata")?;
-        let end = text[m..].find("</metadata>").map(|e| e + m)?;
-        name_after(m).filter(|_| text[m..].find("<name>").map(|n| n + m) < Some(end))
-    };
+    // Nom propre aux métadonnées (leur premier élément), pas celui de <author>.
+    let in_metadata = || crate::gpxmeta::metadata_name_start(&text).and_then(|s| name_after(s - "<name>".len()));
     text.find("<trk>").or_else(|| text.find("<trk ")).and_then(name_after).or_else(in_metadata)
 }
 
@@ -502,6 +572,16 @@ pub fn check_import_against(
     files: &[String],
     existing: &[crate::model::TraceSummary],
 ) -> Result<Vec<crate::model::ImportCheck>> {
+    check_import_with(files, existing, &|hash| index.names_by_hash(hash))
+}
+
+/// Comme [`check_import_against`], sans l'index : `same_file` donne les traces
+/// d'une empreinte. Permet d'analyser les fichiers sans tenir l'index verrouillé.
+pub fn check_import_with(
+    files: &[String],
+    existing: &[crate::model::TraceSummary],
+    same_file: &dyn Fn(&str) -> Result<Vec<String>>,
+) -> Result<Vec<crate::model::ImportCheck>> {
     use crate::index::{similar_routes, RouteKey};
     let mut out = Vec::new();
     for file in files {
@@ -520,7 +600,7 @@ pub fn check_import_against(
                 continue;
             }
         };
-        let same_file = index.names_by_hash(&scan::sha256_file(path)?)?;
+        let same_file = same_file(&scan::sha256_file(path)?)?;
         let key = RouteKey {
             distance_km: analysis.distance_km,
             elevation_gain: analysis.elevation_gain,
@@ -621,6 +701,8 @@ mod tests {
         assert_eq!(quick_name(&p).as_deref(), Some("Boucle du Vexin"));
         fs::write(&p, "<gpx><metadata><name>Meta &amp; co</name></metadata><trk><trkseg/></trk></gpx>").unwrap();
         assert_eq!(quick_name(&p).as_deref(), Some("Meta & co"));
+        fs::write(&p, "<gpx><metadata><author><name>Jean</name></author></metadata><trk><trkseg/></trk></gpx>").unwrap();
+        assert_eq!(quick_name(&p), None, "le nom de l'auteur n'est pas celui de la trace");
     }
 
     fn lib(path: &str) -> Library {

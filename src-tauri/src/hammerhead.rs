@@ -183,7 +183,7 @@ fn dec(s: &str) -> String {
 
 fn http_error(e: ureq::Error) -> String {
     match e {
-        ureq::Error::Status(401 | 403, _) => "Hammerhead a refusé l'accès : reconnecte ton compte dans les Réglages.".into(),
+        ureq::Error::Status(401 | 403, _) => "Hammerhead a refusé l'accès : reconnecte ton compte dans Connexions → Karoo.".into(),
         ureq::Error::Status(429, _) => "Hammerhead limite les requêtes : réessaie dans quelques minutes.".into(),
         ureq::Error::Status(code, r) => crate::http::status("Hammerhead", code, r),
         ureq::Error::Transport(t) => crate::http::unreachable("Hammerhead", t),
@@ -210,7 +210,7 @@ fn token_request(form: &[(&str, &str)]) -> Result<Token, String> {
 /// Connexion du compte : ouvre la page d'autorisation (par `open`), attend le
 /// retour sur l'adresse locale (5 minutes au plus) et enregistre le jeton.
 pub fn connect(open: impl FnOnce(&str) -> Result<(), String>) -> Result<(), String> {
-    let client: Client = client().ok_or("Aucune application Hammerhead : renseigne son client ID et son secret dans les Réglages.")?;
+    let client: Client = client().ok_or("Aucune application Hammerhead : renseigne son client ID et son secret dans Connexions → Karoo (Avancé).")?;
     let port: u16 = client
         .redirect_uri
         .rsplit(':')
@@ -320,12 +320,12 @@ pub fn connect(open: impl FnOnce(&str) -> Result<(), String>) -> Result<(), Stri
 
 /// Jeton valide, renouvelé s'il expire dans moins d'une minute.
 fn access_token() -> Result<String, String> {
-    let token: Token = load("jeton").ok_or("Compte Hammerhead pas connecté : connecte-le dans les Réglages.")?;
+    let token: Token = load("jeton").ok_or("Compte Hammerhead pas connecté : connecte-le dans Connexions → Karoo.")?;
     if token.expires_at.is_none_or(|t| t > now() + 60) {
         return Ok(token.access_token);
     }
     let client: Client = client().ok_or("Application Hammerhead pas configurée.")?;
-    let refresh = token.refresh_token.ok_or("Jeton Hammerhead expiré : reconnecte ton compte dans les Réglages.")?;
+    let refresh = token.refresh_token.ok_or("Jeton Hammerhead expiré : reconnecte ton compte dans Connexions → Karoo.")?;
     let mut fresh = token_request(&[
         ("grant_type", "refresh_token"),
         ("refresh_token", &refresh),

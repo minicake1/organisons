@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Button, Group, Paper, Progress, Select, Stack, Text, Textarea, Title } from '@mantine/core'
+import { Button, Group, Paper, Progress, Select, Stack, Text, Textarea } from '@mantine/core'
 import { IconDownload } from '@tabler/icons-react'
 import { listen } from '@tauri-apps/api/event'
 import { api, type Library } from '../api'
@@ -61,7 +61,6 @@ export default function OpenrunnerPage({ onLibrary }: { onLibrary: () => void })
 
   return (
     <Stack gap="md" maw={860}>
-      <Title order={2}>Openrunner</Title>
       <Text size="sm" c="dimmed">
         Colle les liens de tes parcours Openrunner (un par ligne, ou séparés par des espaces), par exemple
         « https://www.openrunner.com/route-details/24118757 ». Les parcours publics sont téléchargés avec leurs points d'intérêt ; un
@@ -108,7 +107,7 @@ export default function OpenrunnerPage({ onLibrary }: { onLibrary: () => void })
         </Stack>
       </Paper>
       {notice && (
-        <Paper withBorder p="sm" bg="teal.0" c="teal.9">
+        <Paper withBorder p="sm" bg="var(--mantine-color-teal-light)" c="var(--mantine-color-teal-light-color)">
           <Group gap="xs">
             <Text size="sm">{notice}</Text>
             <Button size="compact-sm" variant="white" onClick={onLibrary}>
@@ -118,7 +117,7 @@ export default function OpenrunnerPage({ onLibrary }: { onLibrary: () => void })
         </Paper>
       )}
       {errors.length > 0 && (
-        <Paper withBorder p="sm" bg="orange.0">
+        <Paper withBorder p="sm" bg="var(--mantine-color-orange-light)">
           <Text size="sm" fw={600} mb={4}>
             {errors.length} parcours non importé(s) :
           </Text>

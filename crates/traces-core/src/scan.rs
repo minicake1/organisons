@@ -184,6 +184,34 @@ pub fn write_trace_meta(index: &Index, id: i64) -> Result<bool> {
     Ok(changed)
 }
 
+/// Renomme une trace. Le nouveau nom reste en place aux relectures ; il est aussi
+/// écrit dans le `<name>` du GPX si la bibliothèque l'autorise (renvoie alors
+/// `true`). `None` ou un nom vide : retour au nom lu dans le fichier.
+/// Dans une bibliothèque gérée, le fichier prendra ce nom au prochain « Ranger ».
+pub fn rename_trace(index: &Index, id: i64, name: Option<&str>) -> Result<bool> {
+    let (library, path, _, _) = index.trace_file(id)?;
+    let p = Path::new(&path);
+    let name = name.map(str::trim).filter(|n| !n.is_empty());
+    let Some(new) = name else {
+        let from_file = analyze_file(p).map(|a| a.name).map_err(|_| {
+            Error::Invalid("Fichier injoignable (NAS éteint ?) : impossible de relire son nom.".into())
+        })?;
+        index.set_name(id, None, &from_file)?;
+        return Ok(false);
+    };
+    index.set_name(id, Some(new), "")?;
+    if !library.write_gpx {
+        return Ok(false);
+    }
+    let changed = crate::gpxmeta::write_name_file(p, new)?;
+    if changed {
+        let meta = fs::metadata(p).map_err(|source| Error::Io { path: p.to_owned(), source })?;
+        let mtime = meta.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64).unwrap_or(0);
+        index.set_file_state(id, &path, &sha256_file(p)?, meta.len() as i64, mtime)?;
+    }
+    Ok(changed)
+}
+
 pub fn sha256_file(path: &Path) -> Result<String> {
     let mut f = fs::File::open(path).map_err(|source| Error::Io { path: path.to_owned(), source })?;
     let mut h = Sha256::new();

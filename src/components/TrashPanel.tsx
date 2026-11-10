@@ -64,7 +64,7 @@ export default function TrashPanel({ version = 0, onChanged }: { version?: numbe
         </Button>
       </Group>
       {message && (
-        <Text size="sm" c="teal.8" mt="xs">
+        <Text size="sm" c="var(--mantine-color-teal-light-color)" mt="xs">
           {message}
         </Text>
       )}

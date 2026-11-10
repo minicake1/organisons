@@ -96,7 +96,7 @@ export default function PatternEditor({ library, onSaved }: { library: Library; 
         </Text>
       )}
       {done && (
-        <Text size="xs" c="green.8">
+        <Text size="xs" c="var(--mantine-color-green-light-color)">
           Modèle enregistré. Utilise « Ranger » pour voir les déplacements prévus : rien ne bouge sans ta validation.
         </Text>
       )}

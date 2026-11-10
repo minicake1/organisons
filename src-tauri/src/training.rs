@@ -131,7 +131,7 @@ pub fn icu_disconnect() -> Result<(), String> {
 
 /// Pose une séance au calendrier intervals.icu (date AAAA-MM-JJ) ; renvoie l'identifiant de l'événement.
 pub fn icu_plan(name: &str, zwo: &str, date: &str, sport: &str) -> Result<String, String> {
-    let a = load().ok_or("Compte intervals.icu pas connecté : renseigne-le dans les Réglages.")?;
+    let a = load().ok_or("Compte intervals.icu pas connecté : renseigne-le dans Connexions → Entraînement.")?;
     let valid = date.len() == 10 && date.chars().enumerate().all(|(i, c)| if i == 4 || i == 7 { c == '-' } else { c.is_ascii_digit() });
     if !valid {
         return Err("Date invalide (attendu AAAA-MM-JJ).".into());

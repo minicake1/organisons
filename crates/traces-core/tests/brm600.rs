@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use traces_core::scan::scan_library;
+use traces_core::scan::{self, scan_library};
 use traces_core::*;
 
 fn fixture() -> PathBuf {
@@ -397,6 +397,101 @@ fn corbeille() {
     assert_eq!(organize::purge_trash(&idx, jour + 86_400, Some(7)).unwrap(), 0);
     assert_eq!(organize::purge_trash(&idx, jour + 8 * 86_400, Some(7)).unwrap(), 1);
     assert!(!root.join(organize::TRASH_DIR).exists());
+}
+
+#[test]
+fn renommer_une_trace() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("NAS");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::copy(fixture(), root.join("brm.gpx")).unwrap();
+    let mut idx = Index::open_in_memory().unwrap();
+    let lib = idx.add_library("NAS", &root.to_string_lossy(), "managed", "{nom}.gpx", false).unwrap();
+    scan_library(&mut idx, &lib, 1_000).unwrap();
+    let id = idx.list(&TraceFilter::default()).unwrap()[0].id;
+    let before = std::fs::read(root.join("brm.gpx")).unwrap();
+
+    // Sans écriture dans les GPX : seul l'index change, et le nom tient aux relectures.
+    assert!(!scan::rename_trace(&idx, id, Some("Tour de Manche 2027")).unwrap());
+    assert_eq!(std::fs::read(root.join("brm.gpx")).unwrap(), before);
+    idx.set_library_write_gpx(lib.id, true).unwrap();
+    idx.set_tags(id, &["BRM".to_string()]).unwrap();
+    // Fichier modifié ailleurs : relu, mais le nom choisi reste.
+    std::fs::write(root.join("brm.gpx"), std::fs::read_to_string(fixture()).unwrap().replacen("</gpx>", "<!-- x --></gpx>", 1)).unwrap();
+    scan_library(&mut idx, &lib, 2_000).unwrap();
+    assert_eq!(idx.get(id).unwrap().summary.name, "Tour de Manche 2027");
+
+    // Avec écriture : le <name> du GPX change aussi, et une relecture ne change rien.
+    assert!(scan::rename_trace(&idx, id, Some("Manche & Cotentin")).unwrap());
+    assert!(std::fs::read_to_string(root.join("brm.gpx")).unwrap().contains("<name>Manche &amp; Cotentin</name>"));
+    scan_library(&mut idx, &lib, 3_000).unwrap();
+    assert_eq!(idx.get(id).unwrap().summary.name, "Manche & Cotentin");
+    // Le fichier prend le nouveau nom tout de suite (bibliothèque gérée, modèle « {nom}.gpx »).
+    let to = organize::rename_file(&idx, id).unwrap().expect("déplacé");
+    assert!(to.ends_with("Manche & Cotentin.gpx"), "{to}");
+    assert!(!root.join("brm.gpx").exists() && std::path::Path::new(&to).exists());
+    assert_eq!(idx.get(id).unwrap().summary.path, to);
+    assert_eq!(organize::rename_file(&idx, id).unwrap(), None, "déjà au bon nom");
+    // Bibliothèque indexée sans écriture : le fichier ne bouge pas.
+    let other = dir.path().join("PC");
+    std::fs::create_dir_all(&other).unwrap();
+    std::fs::copy(fixture(), other.join("x.gpx")).unwrap();
+    let pc = idx.add_library("PC", &other.to_string_lossy(), "index", "", false).unwrap();
+    scan_library(&mut idx, &pc, 3_000).unwrap();
+    let pid = idx.trace_id_by_path(&other.join("x.gpx").to_string_lossy()).unwrap().unwrap();
+    scan::rename_trace(&idx, pid, Some("Autre nom")).unwrap();
+    assert_eq!(organize::rename_file(&idx, pid).unwrap(), None);
+    assert!(other.join("x.gpx").exists());
+    // Indexée avec écriture : renommé dans son dossier.
+    idx.set_library_write_gpx(pc.id, true).unwrap();
+    let to = organize::rename_file(&idx, pid).unwrap().expect("renommé");
+    assert_eq!(std::path::Path::new(&to), other.join("Autre nom.gpx"));
+
+    // Nom vide : retour au nom lu dans le fichier (ici celui qu'on y a écrit).
+    scan::rename_trace(&idx, id, None).unwrap();
+    assert!(!idx.has_user_name(id).unwrap());
+    assert_eq!(idx.get(id).unwrap().summary.name, "Manche & Cotentin");
+}
+
+#[test]
+fn remplacement_par_une_version_modifiee() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("NAS");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::copy(fixture(), root.join("brm.gpx")).unwrap();
+    // Version « modifiée » (export gpx.studio) : une petite boucle, sans bloc Organisons.
+    let edited = dir.path().join("brm edit.gpx");
+    let pts: String = (0..50)
+        .map(|i| format!("<trkpt lat=\"{:.5}\" lon=\"{:.5}\"><ele>{}</ele></trkpt>", 49.0 + i as f64 * 0.001, -1.0, 10 + i))
+        .collect();
+    std::fs::write(&edited, format!("<?xml version=\"1.0\"?><gpx version=\"1.1\" creator=\"gpx.studio\" xmlns=\"http://www.topografix.com/GPX/1/1\"><trk><name>BRM court</name><trkseg>{pts}</trkseg></trk></gpx>")).unwrap();
+
+    let mut idx = Index::open_in_memory().unwrap();
+    let jour = 1_777_593_600;
+    // Bibliothèque sans écriture dans les GPX : refusé, rien ne bouge.
+    let ro = idx.add_library("PC", &root.to_string_lossy(), "index", "", false).unwrap();
+    scan_library(&mut idx, &ro, 1_000).unwrap();
+    let id = idx.list(&TraceFilter::default()).unwrap()[0].id;
+    assert!(organize::replace_trace_file(&mut idx, id, &edited, jour).is_err());
+    idx.set_library_write_gpx(ro.id, true).unwrap();
+
+    idx.set_tags(id, &["BRM".to_string()]).unwrap();
+    idx.set_notes(id, "Contrôle à Cherbourg").unwrap();
+    organize::replace_trace_file(&mut idx, id, &edited, jour).unwrap();
+    let t = idx.get(id).unwrap();
+    assert_eq!(t.summary.id, id, "même trace");
+    assert_eq!(t.summary.name, "BRM court");
+    assert!(t.summary.distance_km < 10.0, "{}", t.summary.distance_km);
+    assert_eq!(t.summary.tags, vec!["BRM".to_string()]);
+    assert_eq!(t.notes, "Contrôle à Cherbourg");
+    assert_eq!(idx.count().unwrap(), 1);
+    // Tags et notes réécrits dans le nouveau fichier ; l'ancien est dans la corbeille.
+    assert!(std::fs::read_to_string(root.join("brm.gpx")).unwrap().contains("Contrôle à Cherbourg"));
+    assert_eq!(organize::trash_list(&idx).unwrap().len(), 1);
+    assert!(edited.exists(), "le fichier téléchargé n'est pas touché");
+    // Une relecture ne change rien.
+    scan_library(&mut idx, &ro, jour).unwrap();
+    assert_eq!(idx.get(id).unwrap().summary.tags, vec!["BRM".to_string()]);
 }
 
 #[test]

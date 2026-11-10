@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
+  ActionIcon,
   Anchor,
   Badge,
   Box,
@@ -17,24 +18,36 @@ import {
   Stack,
   TagsInput,
   Text,
+  TextInput,
   Textarea,
   Title,
   Tooltip,
 } from '@mantine/core'
-import { IconArrowLeft, IconCheck, IconChevronDown, IconFolderOpen, IconPencil } from '@tabler/icons-react'
-import { revealItemInDir } from '@tauri-apps/plugin-opener'
+import { IconArrowLeft, IconCheck, IconChevronDown, IconEdit, IconFolderOpen, IconPencil } from '@tabler/icons-react'
+import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener'
 import { api, type Collection, type Poi, type PoiKind, type TraceDetail } from '../api'
 import SportBadge from '../components/SportBadge'
 import TagSuggestions from '../components/TagSuggestions'
 import TrashButton from '../components/TrashButton'
 import SendToDevice from '../components/SendToDevice'
+import InboxPanel, { INBOX_EVENT, TRACE_CHANGED_EVENT } from '../components/InboxPanel'
 import { HILLINESS, POI_KINDS, SURFACE_CLASSES, int, km1, poiKind, slopeColor, surfaceColor, windLabel } from '../labels'
 import { computeSurface } from '../osmSurface'
 import ElevationProfile from '../components/ElevationProfile'
 import TraceMap from '../components/TraceMap'
 import WindArrow from '../components/WindArrow'
 
-export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: { id: number; onBack: () => void; backLabel?: string }) {
+export default function TracePage({
+  id,
+  onBack,
+  backLabel = 'Bibliothèque',
+  onOpen,
+}: {
+  id: number
+  onBack: () => void
+  backLabel?: string
+  onOpen?: (id: number) => void
+}) {
   const [t, setT] = useState<TraceDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [cursor, setCursor] = useState<number | null>(null)
@@ -53,6 +66,42 @@ export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: {
   const [offline, setOffline] = useState<number[]>([])
   // Partie de la trace visible sur la carte : le profil suit le zoom.
   const [range, setRange] = useState<[number, number] | null>(null)
+
+  // Trace remplacée par sa version gpx.studio (bandeau du dossier surveillé) : on la relit.
+  useEffect(() => {
+    const onChanged = (e: Event) => {
+      if ((e as CustomEvent<number>).detail === id) api.getTrace(id).then(setT).catch((err) => setError(String(err)))
+    }
+    window.addEventListener(TRACE_CHANGED_EVENT, onChanged)
+    return () => window.removeEventListener(TRACE_CHANGED_EVENT, onChanged)
+  }, [id])
+  const [studioNotice, setStudioNotice] = useState<string | null>(null)
+  // Renommage : nom affiché, et <name> du GPX si la bibliothèque l'autorise.
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const rename = async (name: string | null) => {
+    setSaveError(null)
+    try {
+      const moved = await api.renameTrace(id, name)
+      setRenaming(null)
+      if (moved) setDeviceNotice(`Fichier renommé : ${moved}`)
+    } catch (e) {
+      setRenaming(null)
+      setSaveError(String(e))
+    }
+    api.getTrace(id).then(setT).catch((e) => setError(String(e)))
+  }
+  const editInGpxStudio = async () => {
+    setSaveError(null)
+    try {
+      await openUrl(await api.gpxstudioOpen(id))
+      window.dispatchEvent(new Event(INBOX_EVENT))
+      setStudioNotice(
+        'Trace ouverte dans gpx.studio (ton navigateur). Une fois modifiée : Fichier → Exporter. Le GPX exporté arrive dans le dossier surveillé, et Organisons te propose de remplacer la trace (l’ancienne version va dans la Corbeille). Le lien vers la trace expire dans 15 minutes.',
+      )
+    } catch (e) {
+      setSaveError(String(e))
+    }
+  }
 
   useEffect(() => {
     api.getTrace(id).then(setT).catch((e) => setError(String(e)))
@@ -90,7 +139,7 @@ export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: {
   const legendItem = (color: string) => ({
     onMouseEnter: () => setHl(color),
     onMouseLeave: () => setHl(null),
-    style: { cursor: "default", padding: "2px 6px", margin: "-2px -6px", borderRadius: 6, background: hl === color ? "#f1f3f5" : undefined },
+    style: { cursor: "default", padding: "2px 6px", margin: "-2px -6px", borderRadius: 6, background: hl === color ? "var(--mantine-color-default-hover)" : undefined },
   })
   const [surfaceBusy, setSurfaceBusy] = useState<string | null>(null)
   const [surfaceError, setSurfaceError] = useState<string | null>(null)
@@ -118,7 +167,7 @@ export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: {
     <Checkbox
       key={i}
       py={6}
-      style={{ borderBottom: '1px solid #f1f3f5' }}
+      style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}
       checked={checked(i)}
       onChange={(e) => {
         const v = e.currentTarget.checked
@@ -149,7 +198,45 @@ export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: {
         </Button>
       </Group>
       <Group align="center">
-        <Title order={2}>{t.name}</Title>
+        {renaming != null ? (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              rename(renaming)
+            }}
+            style={{ display: 'flex', gap: 8, alignItems: 'center' }}
+          >
+            <TextInput
+              autoFocus
+              size="md"
+              w={420}
+              value={renaming}
+              onChange={(e) => setRenaming(e.currentTarget.value)}
+              onKeyDown={(e) => e.key === 'Escape' && setRenaming(null)}
+              aria-label="Nouveau nom"
+            />
+            <Button type="submit" disabled={!renaming.trim()}>
+              Renommer
+            </Button>
+            <Tooltip label="Reprendre le nom écrit dans le fichier GPX">
+              <Button variant="subtle" color="gray" onClick={() => rename(null)}>
+                Nom du fichier
+              </Button>
+            </Tooltip>
+            <Button variant="subtle" color="gray" onClick={() => setRenaming(null)}>
+              Annuler
+            </Button>
+          </form>
+        ) : (
+          <Group gap={4} wrap="nowrap">
+            <Title order={2}>{t.name}</Title>
+            <Tooltip label="Renommer la trace">
+              <ActionIcon variant="subtle" color="gray" aria-label="Renommer la trace" onClick={() => setRenaming(t.name)}>
+                <IconPencil size={18} />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
+        )}
         {t.source === 'komoot' && (
           <Badge color="green" variant="light">
             Komoot
@@ -166,13 +253,24 @@ export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: {
             Ouvrir le dossier
             </Button>
           </Tooltip>
+          <Tooltip label="Modifier la trace dans gpx.studio (couper, inverser, retracer…), dans ton navigateur">
+            <Button variant="default" leftSection={<IconEdit size={16} />} disabled={offline.includes(t.libraryId)} onClick={editInGpxStudio}>
+              Modifier dans gpx.studio
+            </Button>
+          </Tooltip>
           <TrashButton look="button" trace={t} onTrashed={onBack} />
           <SendToDevice traceId={t.id} onMessage={(text, isError) => (isError ? setSaveError(text) : setDeviceNotice(text))} />
         </Group>
       </Group>
 
+      <InboxPanel onOpen={(other) => (other === id ? undefined : onOpen?.(other))} />
+      {studioNotice && (
+        <Paper withBorder p="xs" bg="var(--mantine-color-indigo-light)" c="var(--mantine-color-indigo-light-color)" onClick={() => setStudioNotice(null)}>
+          <Text size="sm">{studioNotice}</Text>
+        </Paper>
+      )}
       {deviceNotice && (
-        <Paper withBorder p="xs" bg="teal.0" c="teal.9" onClick={() => setDeviceNotice(null)}>
+        <Paper withBorder p="xs" bg="var(--mantine-color-teal-light)" c="var(--mantine-color-teal-light-color)" onClick={() => setDeviceNotice(null)}>
           <Text size="sm">{deviceNotice}</Text>
         </Paper>
       )}
@@ -273,7 +371,7 @@ export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: {
                   ))}
                 </Group>
               )}
-              <SimpleGrid cols={5} pt="xs" style={{ borderTop: '1px solid #f1f3f5' }}>
+              <SimpleGrid cols={5} pt="xs" style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}>
                 <Stat value={`${km1(t.distanceKm)} km`} label="Distance" />
                 <Stat value={`${int(t.elevationGain)} m`} label="Montée" />
                 <Stat value={`${int(t.elevationLoss)} m`} label="Descente" />
@@ -391,9 +489,9 @@ export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: {
               )}
               <Group gap="md">
                 <Text size="sm">Relief : {HILLINESS[t.hilliness]}</Text>
-                <Group gap={4} c="blue.8">
+                <Group gap={4} c="var(--mantine-color-blue-light-color)">
                   <WindArrow wind={t.wind} />
-                  <Text size="sm" c="blue.8">
+                  <Text size="sm" c="var(--mantine-color-blue-light-color)">
                     Vent idéal : {windLabel(t.wind)}
                   </Text>
                 </Group>

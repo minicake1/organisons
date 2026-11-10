@@ -68,7 +68,7 @@ export default function WorkoutDetail({ workout }: { workout: WorkoutSummary }) 
               const bg = b.kind === 'free' ? '#dee2e6' : zoneColor(mid)
               const dark = b.kind === 'free' || mid < 0.6 || (mid >= 0.9 && mid < 1.05)
               return (
-                <Group key={i} gap={0} wrap="nowrap" style={{ borderRadius: 4, overflow: 'hidden', border: '1px solid #e9ecef' }}>
+                <Group key={i} gap={0} wrap="nowrap" style={{ borderRadius: 4, overflow: 'hidden', border: '1px solid var(--mantine-color-default-border)' }}>
                   <Text size="sm" w={70} ta="center" py={3} bg="white" style={{ flex: 'none', fontVariantNumeric: 'tabular-nums' }}>
                     {mmss(b.duration)}
                   </Text>
@@ -146,8 +146,8 @@ function PowerAxisChart({ blocks, ftp }: { blocks: WorkoutBlock[]; ftp: number |
         <svg width={W} height={H} style={{ display: 'block' }} aria-label="Profil de puissance avec axes">
           {yTicks.map((p) => (
             <g key={p}>
-              <line x1={L} x2={W - R} y1={y(p)} y2={y(p)} stroke={Math.abs(p - 1) < 1e-9 ? '#adb5bd' : '#f1f3f5'} strokeDasharray={Math.abs(p - 1) < 1e-9 ? '5 4' : undefined} />
-              <text x={L - 6} y={y(p) + 4} textAnchor="end" fontSize={11} fill="#5c636a">
+              <line x1={L} x2={W - R} y1={y(p)} y2={y(p)} stroke={Math.abs(p - 1) < 1e-9 ? '#adb5bd' : 'var(--mantine-color-default-border)'} strokeDasharray={Math.abs(p - 1) < 1e-9 ? '5 4' : undefined} />
+              <text x={L - 6} y={y(p) + 4} textAnchor="end" fontSize={11} style={{ fill: "var(--mantine-color-dimmed)" }}>
                 {label(p)}
               </text>
             </g>
@@ -167,7 +167,7 @@ function PowerAxisChart({ blocks, ftp }: { blocks: WorkoutBlock[]; ftp: number |
           {xTicks.map((m) => (
             <g key={m}>
               <line x1={x(m * 60)} x2={x(m * 60)} y1={y(0)} y2={y(0) + 5} stroke="#868e96" />
-              <text x={x(m * 60)} y={H - 8} textAnchor="middle" fontSize={11} fill="#5c636a">
+              <text x={x(m * 60)} y={H - 8} textAnchor="middle" fontSize={11} style={{ fill: "var(--mantine-color-dimmed)" }}>
                 {m === 0 ? '0' : m >= 60 && m % 60 === 0 ? `${m / 60} h` : `${m} min`}
               </text>
             </g>

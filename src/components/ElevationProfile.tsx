@@ -104,7 +104,7 @@ export default function ElevationProfile({ profile, pois, cursor, onCursor, colo
     return { px, py, bands, line, yTicks, xTicks, xStep }
   }, [profile, colors, kmA, kmB, X1, Y_BASE])
 
-  const label: CSSProperties = { position: 'absolute', fontSize: 11, color: '#5c636a', whiteSpace: 'nowrap', pointerEvents: 'none' }
+  const label: CSSProperties = { position: 'absolute', fontSize: 11, color: 'var(--mantine-color-dimmed)', whiteSpace: 'nowrap', pointerEvents: 'none' }
   const kmText = (k: number) => (g.xStep < 1 ? km1(k) : int(k))
   const cur = cursor != null ? profile[cursor] : null
   const curIn = cur != null && cur.km >= kmA - 1e-6 && cur.km <= kmB + 1e-6
@@ -142,8 +142,8 @@ export default function ElevationProfile({ profile, pois, cursor, onCursor, colo
           </g>
           {cur && curIn && (
             <g>
-              <line x1={curX} x2={curX} y1={Y_TOP} y2={Y_BASE + 6} stroke="#212529" strokeDasharray="3 3" />
-              <circle cx={curX} cy={g.py(cur.ele)} r={5} fill="#212529" stroke="#fff" strokeWidth={2} />
+              <line x1={curX} x2={curX} y1={Y_TOP} y2={Y_BASE + 6} style={{ stroke: "var(--mantine-color-text)" }} strokeDasharray="3 3" />
+              <circle cx={curX} cy={g.py(cur.ele)} r={5} style={{ fill: "var(--mantine-color-text)", stroke: "var(--mantine-color-body)" }} strokeWidth={2} />
             </g>
           )}
         </svg>
@@ -162,12 +162,12 @@ export default function ElevationProfile({ profile, pois, cursor, onCursor, colo
           </span>
         ))}
       {width > 0 && (
-        <span style={{ ...label, right: RIGHT, top: Y_BASE + 10, fontWeight: 600, color: '#343a40', background: '#fff', paddingLeft: 4 }}>
+        <span style={{ ...label, right: RIGHT, top: Y_BASE + 10, fontWeight: 600, color: 'var(--mantine-color-text)', background: 'var(--mantine-color-body)', paddingLeft: 4 }}>
           {zoomed ? `${km1(kmB)} km` : `${km1(total)} km`}
         </span>
       )}
       {width > 0 && zoomed && (
-        <span style={{ ...label, left: X0 + 6, top: 2, fontSize: 10, background: 'rgba(255,255,255,.85)', padding: '1px 5px', borderRadius: 4 }}>
+        <span style={{ ...label, left: X0 + 6, top: 2, fontSize: 10, background: 'color-mix(in srgb, var(--mantine-color-body) 85%, transparent)', padding: '1px 5px', borderRadius: 4 }}>
           Partie visible sur la carte : km {km1(kmA)} – {km1(kmB)}
         </span>
       )}
@@ -209,8 +209,8 @@ export default function ElevationProfile({ profile, pois, cursor, onCursor, colo
             position: 'absolute',
             top: 4,
             [curX > W * 0.55 ? 'right' : 'left']: curX > W * 0.55 ? W - curX + 12 : curX + 12,
-            background: '#fff',
-            border: '1px solid #dee2e6',
+            background: 'var(--mantine-color-body)',
+            border: '1px solid var(--mantine-color-default-border)',
             borderRadius: 8,
             boxShadow: '0 2px 8px rgba(0,0,0,.12)',
             padding: '8px 12px',
@@ -222,7 +222,7 @@ export default function ElevationProfile({ profile, pois, cursor, onCursor, colo
           {near && (
             <div style={{ fontWeight: 700, color: '#fff', background: '#212529', borderRadius: 4, padding: '2px 6px', marginBottom: 6, display: 'inline-block' }}>{near.name}</div>
           )}
-          <div style={{ display: 'flex', gap: 12, whiteSpace: 'nowrap', color: '#343a40' }}>
+          <div style={{ display: 'flex', gap: 12, whiteSpace: 'nowrap', color: 'var(--mantine-color-text)' }}>
             <span>
               <b>{km1(cur.km)}</b> km
             </span>

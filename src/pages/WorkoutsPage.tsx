@@ -148,12 +148,12 @@ export default function WorkoutsPage() {
         </Group>
       </Group>
       {notice && (
-        <Paper withBorder p="sm" bg="teal.0" c="teal.9" onClick={() => setNotice(null)}>
+        <Paper withBorder p="sm" bg="var(--mantine-color-teal-light)" c="var(--mantine-color-teal-light-color)" onClick={() => setNotice(null)}>
           {notice}
         </Paper>
       )}
       {error && (
-        <Paper withBorder p="sm" bg="red.0" c="red.9" onClick={() => setError(null)}>
+        <Paper withBorder p="sm" bg="var(--mantine-color-red-light)" c="var(--mantine-color-red-light-color)" onClick={() => setError(null)}>
           {error}
         </Paper>
       )}

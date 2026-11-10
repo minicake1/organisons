@@ -76,7 +76,7 @@ export default function CollectionsPage({ onOpenCollection }: { onOpenCollection
                     <UnstyledButton onClick={() => onOpenCollection(c)}>
                       <Group gap="xs">
                         {c.isTour ? <IconRoute size={16} color="#e8590c" /> : <IconFolder size={16} color="#4263eb" />}
-                        <Text fw={500} c="blue.8">
+                        <Text fw={500} c="var(--mantine-color-blue-light-color)">
                           {c.name}
                         </Text>
                       </Group>

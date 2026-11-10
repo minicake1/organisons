@@ -1,5 +1,6 @@
 html, body, #root { height: 100%; margin: 0; }
-body { background: #f8f9fa; }
+body { background: var(--mantine-color-gray-0); }
+[data-mantine-color-scheme="dark"] body { background: var(--mantine-color-dark-8); }
 
 .km-mark {
   min-width: 26px; height: 26px; padding: 0 4px; box-sizing: border-box;

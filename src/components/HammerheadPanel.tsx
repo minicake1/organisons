@@ -3,7 +3,7 @@ import { Anchor, Badge, Button, Code, Group, Paper, PasswordInput, Stack, Text, 
 import { api, type HammerheadStatus } from '../api'
 
 /**
- * Réglages → Hammerhead (Karoo) : l'application créée par l'utilisateur sur le
+ * Connexions → Karoo (Hammerhead) : l'application créée par l'utilisateur sur le
  * Dashboard Hammerhead, puis la connexion de son compte par le navigateur.
  */
 export default function HammerheadPanel() {
@@ -92,6 +92,22 @@ export default function HammerheadPanel() {
           </Text>
         ) : (
           <>
+            {!status?.builtinAvailable && (
+              <Text size="sm" c="dimmed">
+                Cette version d’Organisons n’intègre pas d’application Hammerhead : crée la tienne une fois, gratuitement.
+                <br />
+                1. Sur le Dashboard Hammerhead (
+                <Anchor size="sm" href="https://dashboard.hammerhead.io" target="_blank">
+                  dashboard.hammerhead.io
+                </Anchor>
+                ), active le compte développeur et accepte la licence de l’API.
+                <br />
+                2. Crée une application avec l’adresse de retour ci-dessous (par défaut http://localhost:3001) et les accès « route:write » et
+                « workout:write ».
+                <br />
+                3. Recopie ici son client ID et son secret, enregistre, puis « Connecter mon compte ».
+              </Text>
+            )}
             <Text size="xs" c="dimmed">
               Application Hammerhead à utiliser (Dashboard Hammerhead, compte développeur, onglet « Réglages de l’API ») : même adresse de
               retour qu’ici. Client ID et secret sont rangés dans le gestionnaire d’identifiants de Windows.
@@ -168,7 +184,7 @@ export default function HammerheadPanel() {
           )}
         </Group>
         {notice && (
-          <Text size="sm" c="teal.8">
+          <Text size="sm" c="var(--mantine-color-teal-light-color)">
             {notice}
           </Text>
         )}

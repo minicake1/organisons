@@ -183,6 +183,15 @@ export const api = {
   checkImport: (files: string[]) => invoke<ImportCheck[]>('check_import', { files }),
   offlineLibraries: () => invoke<number[]>('offline_libraries'),
   trashTrace: (id: number) => invoke<string>('trash_trace', { id }),
+  gpxstudioOpen: (id: number) => invoke<string>('gpxstudio_open', { id }),
+  /** Renomme une trace et son fichier (null : nom du GPX) ; nouveau chemin du fichier s'il a changé. */
+  renameTrace: (id: number, name: string | null) => invoke<string | null>('rename_trace', { id, name }),
+  inboxList: () => invoke<Inbox>('inbox_list'),
+  inboxDir: () => invoke<string>('inbox_dir'),
+  inboxSetDir: (dir: string) => invoke<void>('inbox_set_dir', { dir }),
+  inboxDismiss: (paths: string[]) => invoke<void>('inbox_dismiss', { paths }),
+  inboxReplace: (path: string, traceId: number) => invoke<void>('inbox_replace', { path, traceId }),
+  inboxImport: (paths: string[], libraryId: number) => invoke<OrganizeReport>('inbox_import', { paths, libraryId }),
   trashInfo: () => invoke<SetAsideInfo>('trash_info'),
   trashList: () => invoke<TrashItem[]>('trash_list'),
   setAsideList: () => invoke<TrashItem[]>('set_aside_list'),
@@ -347,4 +356,20 @@ export interface IcuStatus {
   connected: boolean
   athleteId: string
   name: string
+}
+
+/** GPX arrivé dans le dossier surveillé (export gpx.studio, autre site…). */
+export interface InboxItem {
+  path: string
+  file: string
+  modified: number
+  check: ImportCheck
+  /** Version modifiée probable d'une trace ouverte dans gpx.studio. */
+  editOf: { traceId: number; name: string; canReplace: boolean } | null
+}
+export interface Inbox {
+  dir: string
+  items: InboxItem[]
+  /** Une modification gpx.studio attend son retour. */
+  waiting: boolean
 }
