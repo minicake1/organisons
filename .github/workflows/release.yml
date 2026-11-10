@@ -1,0 +1,61 @@
+# Installateurs Windows d'une version : à chaque tag « vX.Y.Z » poussé, GitHub
+# construit le .msi et le .exe sur une machine propre, sans hammerhead.local.env
+# (donc sans application Hammerhead intégrée), et les joint à une Release en
+# brouillon, à relire puis publier depuis GitHub.
+#
+#   git tag -a v0.6.0 -m "Organisons v0.6.0" && git push origin v0.6.0
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Installateurs Windows
+    runs-on: windows-latest
+    env:
+      ORGANISONS_PUBLIC_BUILD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Le tag correspond à la version de package.json
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Le tag $GITHUB_REF_NAME ne correspond pas à la version $version de package.json."
+            exit 1
+          fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: npm ci
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Organisons ${{ github.ref_name }}
+          releaseDraft: true
+          prerelease: false
+          releaseBody: |
+            ## Installer (Windows 10 ou 11)
+
+            Télécharge **un** des deux installateurs ci-dessous :
+            - `Organisons_…_x64_fr-FR.msi` ;
+            - ou `Organisons_…_x64-setup.exe`.
+
+            L'appli s'installe dans `C:\Program Files\Organisons`. Elle utilise WebView2, déjà présent sur Windows 11.
+            Les installateurs ne sont pas signés : Windows SmartScreen peut afficher un avertissement (« Informations complémentaires » → « Exécuter quand même »).
+
+            Pour envoyer des traces vers un Karoo, crée ta propre application Hammerhead : la marche à suivre est dans Connexions → Karoo.
+
+            Nouveautés : voir le [README](https://github.com/minicake1/organisons#readme).
