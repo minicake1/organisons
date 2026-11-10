@@ -1,4 +1,5 @@
-//! Tests sur un vrai fichier : BRM 600 « Tour de Manche 2027 » (Openrunner).
+//! Tests sur une trace synthétique au format Openrunner (`fixtures/boucle-600.gpx`, générée par
+//! `fixtures/generer-boucle.mjs`) : boucle de 605 km, 14 322 points, 182 points d’intérêt.
 
 use std::path::PathBuf;
 
@@ -6,7 +7,7 @@ use traces_core::scan::{self, scan_library};
 use traces_core::*;
 
 fn fixture() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/brm600-tour-de-manche.gpx")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/boucle-600.gpx")
 }
 
 #[test]
@@ -122,7 +123,7 @@ fn tags_ecrits_dans_le_gpx_openrunner() {
     assert_eq!(t.summary.tags, vec!["Brevet".to_string(), "Manche & côte".to_string()]);
     // Nouvelle trace dans cet index : l’identifiant Openrunner retiré du nom est ajouté aux notes.
     assert_eq!(t.notes, "Contrôle secret <à vérifier>
-Openrunner : https://www.openrunner.com/route-details/24118757");
+Openrunner : https://www.openrunner.com/route-details/12345678");
     assert_eq!(t.summary.name, "BRM 600 Tour de Manche");
 
     // Bibliothèque sans autorisation d'écriture : le fichier n'est pas touché.
@@ -150,7 +151,7 @@ fn rangement_et_import() {
     // Aperçu : deux traces au même nom → la seconde est numérotée.
     let moves = organize::plan(&idx, &lib).unwrap();
     assert_eq!(moves.len(), 2, "{moves:?}");
-    // Année lue dans le titre (« … 2027-24118757 »), nom nettoyé (sans « _ », date ni identifiant Openrunner).
+    // Année lue dans le titre (« … 2027-12345678 »), nom nettoyé (sans « _ », date ni identifiant Openrunner).
     let base = root.join("Vélo").join("2027");
     let name = "BRM 600 Tour de Manche";
     assert!(moves.iter().all(|m| m.to.starts_with(&*base.to_string_lossy())), "{moves:?}");

@@ -157,7 +157,7 @@ crates/traces-core/     cœur Rust sans interface, testé seul
   src/tour.rs           export des tours
   src/workout.rs        séances .zwo
   src/device.rs         GPX préparé pour un appareil
-  tests/brm600.rs       tests sur un vrai fichier (BRM 600 Tour de Manche, Openrunner)
+  tests/brm600.rs       tests sur une trace synthétique au format Openrunner (fixtures/boucle-600.gpx)
 src-tauri/src/          application Tauri : commandes (lib.rs), Komoot, Openrunner, Hammerhead,
                         Zwift et intervals.icu (training.rs), gpx.studio et dossier surveillé,
                         client HTTP commun

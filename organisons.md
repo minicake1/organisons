@@ -8,7 +8,7 @@ Tout le texte visible par l'utilisateur est en français.
 ## Commandes
 
 - `npm install` puis `npm run tauri dev` : lance l'appli
-- `cargo test -p traces-core` : tests du cœur, dont une vraie trace (BRM 600 Tour de Manche, Openrunner, 182 waypoints)
+- `cargo test -p traces-core` : tests du cœur, dont une trace synthétique au format Openrunner (`tests/fixtures/boucle-600.gpx`, 605 km, 182 POI, régénérable avec `node crates/traces-core/tests/fixtures/generer-boucle.mjs`)
 - `npm run build` : contrôle des types TypeScript et build de Vite
 - `npm run build:public` : installateurs à diffuser (sans l’application Hammerhead intégrée, vérifiés)
 - `cargo run -p traces-core --example indexer -- <dossier> [base.sqlite]` : indexation en ligne de commande
@@ -138,8 +138,8 @@ Avant de pousser une nouvelle version (changement du numéro dans `package.json`
 ### Avant de rendre le dépôt public
 - **Secret Hammerhead** : réglé pour les installateurs par `npm run build:public` (voir v0.6). Reste à demander à Hammerhead ce qu'ils autorisent pour une appli de bureau distribuée (application commune intégrée, PKCE, ou chacun la sienne), et à vérifier la licence de leur API.
 - **Licence : AGPL-3.0-or-later, choisie et appliquée le 10/11/2026** (avant : PolyForm Noncommercial 1.0.0). Raison : comme la GPL, toute redistribution partage son code, et une version proposée en ligne (version web, serveur d'échange OAuth…) doit aussi publier ses modifications. L'usage commercial est permis, à condition de partager le code. Du code de Pédalons (PolyForm Noncommercial) ne pourrait pas être repris sans l'accord de son auteur. À vérifier : licences des dépendances (npm, Cargo) et mentions des données (OpenStreetMap ODbL, OpenFreeMap, VersaTiles).
-- **Historique Git** : un commit (fusion faite sur GitHub) porte une adresse e-mail personnelle comme auteur ; les autres utilisent l'adresse `noreply` de GitHub. À décider avant de rendre le dépôt public (réécrire l'historique, ou laisser).
-- **Fichier de test** `crates/traces-core/tests/fixtures/brm600-tour-de-manche.gpx` : parcours Openrunner public d'un tiers. À remplacer par une trace dont on a les droits (ou synthétique) avant publication, ou demander l'accord de son auteur ; les tests vérifient ses chiffres exacts (605 km, 182 POI).
+- **Historique Git** : le commit fait sur GitHub qui portait une adresse e-mail personnelle est réécrit avec l’adresse `noreply` de GitHub (11/2026).
+- **Fichier de test** : l’ancien parcours Openrunner d’un tiers est remplacé par une trace synthétique (`boucle-600.gpx`, générée par `generer-boucle.mjs`) et effacé de l’historique Git (11/2026).
 - **Komoot** : API interne non officielle, déjà signalée dans l'appli et le README.
 
 ### Autres appareils GPS
