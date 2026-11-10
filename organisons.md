@@ -79,6 +79,16 @@ Maquettes (canevas claude.ai, version « v0.1 ») : https://claude.ai/artifact/U
 - **Suppression d’une trace** : croix sur la tuile, corbeille en bout de ligne (liste, liste + carte), bouton « Supprimer » sur la fiche ; toujours confirmée (`TrashButton`). Le GPX va dans `.organisons-corbeille` de sa bibliothèque (`organize::trash_trace`, préfixe date), récupérable jusqu’au vidage : onglet Corbeille (au-dessus de Réglages, `TrashPage`) avec la liste, « Restaurer » (`restore_from_trash` : retour à la racine de la bibliothèque sous le nom d’origine, réindexé) et le vidage manuel ou auto 7/14/30 jours (`trash_purge_days`). Icônes de suppression à 45 % d’opacité, 100 % au survol (`.trash-faded`). Même mécanisme que les doublons mis de côté (`move_aside`, `purge_aside`).
 - **Données de développement séparées** : `npm run tauri dev` utilise `index-dev.sqlite` (copie de `index.sqlite` au premier lancement) ; la version installée garde `index.sqlite`.
 
+## Choix validés pour la v0.4 (10/11/2026)
+
+- **Navigation** : historique des écrans visités (50 au plus, l’écran seulement : filtres et défilement non gardés), Alt+← / Alt+→ et boutons latéraux de la souris, sans flèches à l’écran (`App.tsx`, `nav`).
+- **Onglet Corbeille** : bascule « Traces supprimées » / « Doublons mis de côté » (`organize::set_aside_list`) ; « Restaurer » marche pour les deux (`restore_from_trash`).
+- **Doublons par lot** : cases sur les groupes (« Tout », « Les identiques »), règle de la trace gardée (plus ancienne, plus récente, plus de tags, bibliothèque gérée ; repère « Gardée » / « Mise de côté »), « Mettre les autres de côté » confirmé, ou « Pas des doublons ».
+- **Imports Komoot et Openrunner** : un parcours déjà présent (même fichier ou même parcours, ex. exporté à la main) est ignoré et noté comme importé (`import_one` dans `lib.rs`, liste `skipped` du rapport).
+- **Tours** : une collection devient un tour (interrupteur dans Collections, `collections.is_tour`) ; étapes ordonnées par date puis nom à l’activation (`collection_traces.position`, gardé quand une trace change d’autres collections), ordre modifiable en glissant la poignée ⋮⋮ des étapes (événements de pointeur, pas le glisser-déposer HTML que Tauri intercepte sous Windows). Vue `TourPage` : carte et profil enchaînés (km, D+ et D− cumulés), couleur par étape ou pente, chiffres du tour ou d’une étape. Export (`tour.rs`) : un GPX avec une piste par étape (« 01 - nom ») et tous les POI, ou étape par étape dans un dossier.
+- **Openrunner** (`src-tauri/src/openrunner.rs`, onglet Openrunner) : coller des liens de parcours ; les parcours publics se téléchargent sans compte (`api.openrunner.com/api/v2/routes/{id}/export/gpx-track`, avec les POI), un parcours privé est refusé (export manuel). Import un par un (`openrunner-progress`), parcours déjà importés mémorisés (`external_imports`, source « openrunner »).
+- **Komoot** (`src-tauri/src/komoot.rs`, API interne non officielle) : connexion `GET /v006/account/email/{email}/` en Basic → identifiant et jeton, rangés dans le gestionnaire d’identifiants Windows (crate `keyring`, mot de passe non conservé) ; liste `/v007/users/{id}/tours/` (planifiés et réalisés) ; GPX `/v007/tours/{id}.gpx`. Import parcours par parcours (téléchargement puis `import_files`, index verrouillé le temps d’un parcours), avancement envoyé par l’événement `komoot-progress` (barre dans l’onglet), parcours déjà importés mémorisés (`external_imports`). Tour : sélection et modification par lot des étapes, corbeille par étape ; survol d’une étape = les autres atténuées à 40 % et halo jaune sur la carte (`TraceMap` `glow`) ; légende des pentes avec la même mise en avant.
+
 ## Build et dépôt
 
 - Lancement sous Windows 11 validé le 09/11/2026 (`npm run tauri dev`).
@@ -89,16 +99,10 @@ Maquettes (canevas claude.ai, version « v0.1 ») : https://claude.ai/artifact/U
 
 ## Feuille de route
 
-### v0.4 : tours
-- **Tours** : une collection de type « tour » qui regroupe plusieurs traces (étapes) dans une seule vue : carte avec toutes les étapes, profil enchaîné, bornes et POI de l’ensemble.
-- Chiffres pour le tour entier (distance, D+/D−, revêtement, nombre d’étapes) ou pour chaque GPX séparément (sélection d’une étape).
-- Ordre des étapes modifiable ; export possible du tour en un seul GPX ou étape par étape.
+### v0.5 : appareils GPS et entraînements
+- **Appareils GPS** : Garmin et Wahoo réservent leur API à des partenaires. Mode recommandé : passer par le compte Pédalons ; sinon copie USB dans `Garmin\NewFiles` vers un Edge.
+- **Entraînements** : nouvelle catégorie à côté des sports, avec la prise en charge des fichiers `.zwo` (séances structurées Zwift : XML avec échauffement, intervalles, paliers en % de FTP, récupération). Lecture, classement (tags, collections), durée et charge, graphique de puissance par bloc ; rangés dans les bibliothèques comme les GPX.
 
-### v0.5 : Komoot
-- Pas d’API publique, seulement une API partenaire B2B. Passer par l’API interne `https://api.komoot.de/v007/` (identifiants stockés dans le trousseau du système) ; peut cesser de fonctionner à tout moment.
-
-### v0.6 : appareils GPS
-- Garmin et Wahoo réservent leur API à des partenaires. Mode recommandé : passer par le compte Pédalons ; sinon copie USB dans `Garmin\NewFiles` vers un Edge.
-
-### Plus tard : agenda Pédalons
-- Le flux ICS ne contient que des liens vers les sorties, pas de GPX. Il faudra l’API de Pédalons avec le compte de l’utilisateur ; Pédalons n’a pas de clé d’accès personnelle, à ajouter côté Pédalons.
+### Plus tard
+- **Version macOS** : Tauri sait produire une appli Mac (`.dmg`) ; à prévoir : build sur un Mac (ou CI GitHub macOS), signature et notarisation Apple, trousseau macOS pour le jeton Komoot (crate `keyring`, déjà multiplateforme), chemins de NAS (`/Volumes/…`), tests de l’interface sous WebKit.
+- **Agenda Pédalons** : le flux ICS ne contient que des liens vers les sorties, pas de GPX. Il faudra l’API de Pédalons avec le compte de l’utilisateur ; Pédalons n’a pas de clé d’accès personnelle, à ajouter côté Pédalons.

@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
-import { ActionIcon, Button, Group, Modal, Paper, Stack, Table, Text, TextInput, Title, Tooltip, UnstyledButton } from '@mantine/core'
-import { IconFolder, IconPencil, IconPlus, IconTrash } from '@tabler/icons-react'
+import { ActionIcon, Button, Group, Modal, Paper, Stack, Switch, Table, Text, TextInput, Title, Tooltip, UnstyledButton } from '@mantine/core'
+import { IconFolder, IconPencil, IconPlus, IconRoute, IconTrash } from '@tabler/icons-react'
 import { api, type Collection } from '../api'
 
 /**
  * Écran Collections : listes nommées de traces (« BRM 2027 », « Séjour Vercors »…).
  * Une trace peut être dans plusieurs collections ; on l'y range depuis sa fiche.
  */
-export default function CollectionsPage({ onOpenCollection }: { onOpenCollection: (id: number) => void }) {
+export default function CollectionsPage({ onOpenCollection }: { onOpenCollection: (c: Collection) => void }) {
   const [list, setList] = useState<Collection[]>([])
   const [error, setError] = useState<string | null>(null)
   const [name, setName] = useState('')
@@ -53,7 +53,7 @@ export default function CollectionsPage({ onOpenCollection }: { onOpenCollection
       <Paper withBorder radius="md">
         {list.length === 0 ? (
           <Text p="md" c="dimmed" size="sm">
-            Aucune collection. Crée-en une, puis ajoute des traces depuis leur fiche (encadré « Classement »).
+            Aucune collection. Crée-en une, puis ajoute des traces depuis leur fiche ou par lot depuis la Bibliothèque. Une collection peut devenir un tour (étapes).
           </Text>
         ) : (
           <Table verticalSpacing="xs" highlightOnHover>
@@ -61,6 +61,11 @@ export default function CollectionsPage({ onOpenCollection }: { onOpenCollection
               <Table.Tr>
                 <Table.Th>Collection</Table.Th>
                 <Table.Th w={110}>Traces</Table.Th>
+                <Table.Th w={110}>
+                  <Tooltip label="Un tour regroupe ses traces en étapes : carte, profil et chiffres de l’ensemble ou d’une étape." multiline w={260}>
+                    <span>Tour</span>
+                  </Tooltip>
+                </Table.Th>
                 <Table.Th w={90} />
               </Table.Tr>
             </Table.Thead>
@@ -68,9 +73,9 @@ export default function CollectionsPage({ onOpenCollection }: { onOpenCollection
               {list.map((c) => (
                 <Table.Tr key={c.id}>
                   <Table.Td>
-                    <UnstyledButton onClick={() => onOpenCollection(c.id)}>
+                    <UnstyledButton onClick={() => onOpenCollection(c)}>
                       <Group gap="xs">
-                        <IconFolder size={16} color="#4263eb" />
+                        {c.isTour ? <IconRoute size={16} color="#e8590c" /> : <IconFolder size={16} color="#4263eb" />}
                         <Text fw={500} c="blue.8">
                           {c.name}
                         </Text>
@@ -78,6 +83,14 @@ export default function CollectionsPage({ onOpenCollection }: { onOpenCollection
                     </UnstyledButton>
                   </Table.Td>
                   <Table.Td>{c.count}</Table.Td>
+                  <Table.Td>
+                    <Switch
+                      size="sm"
+                      aria-label={`${c.name} est un tour`}
+                      checked={c.isTour}
+                      onChange={(e) => act(api.setCollectionTour(c.id, e.currentTarget.checked))}
+                    />
+                  </Table.Td>
                   <Table.Td>
                     <Group gap={4} justify="flex-end" wrap="nowrap">
                       <Tooltip label="Renommer">

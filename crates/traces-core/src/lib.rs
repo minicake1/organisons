@@ -14,6 +14,7 @@ pub mod naming;
 pub mod organize;
 pub mod scan;
 pub mod sport;
+pub mod tour;
 pub mod surface;
 
 pub use analyze::{analyze_file, analyze_gpx};

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Anchor, Badge, Button, Code, Group, Loader, Modal, Paper, Select, Stack, Table, Text, Title, Tooltip } from '@mantine/core'
+import { Anchor, Badge, Button, Checkbox, Code, Group, Loader, Modal, Paper, Select, Stack, Table, Text, Title, Tooltip } from '@mantine/core'
 import { IconFolderOpen } from '@tabler/icons-react'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
 import { api, type DuplicateSet, type Library, type SetAsideInfo, type TraceSummary } from '../api'
@@ -19,6 +19,11 @@ export default function DuplicatesPage({ onOpen, onChanged }: { onOpen: (id: num
   const [info, setInfo] = useState<SetAsideInfo | null>(null)
   const [purgeDays, setPurgeDays] = useState(0)
   const [confirmPurge, setConfirmPurge] = useState(false)
+  // Gestion par lot : groupes cochés, trace gardée dans chacun, les autres mises de côté.
+  const [picked, setPicked] = useState<string[]>([])
+  const [keep, setKeep] = useState<KeepRule>("oldest")
+  const [confirmBatch, setConfirmBatch] = useState(false)
+  const [batchBusy, setBatchBusy] = useState<string | null>(null)
 
   const refresh = () => {
     api
@@ -98,6 +103,63 @@ export default function DuplicatesPage({ onOpen, onChanged }: { onOpen: (id: num
         </Group>
       </Paper>
 
+      {sets.length > 0 && (
+        <Paper withBorder p="xs" radius="md" bg="blue.0" style={{ position: 'sticky', top: 0, zIndex: 5 }}>
+          <Group gap="sm">
+            <Text size="sm" fw={600}>
+              {picked.length} groupe(s) sur {sets.length}
+            </Text>
+            <Button size="compact-sm" variant="subtle" onClick={() => setPicked(sets.map(groupKey))}>
+              Tout sélectionner
+            </Button>
+            <Button size="compact-sm" variant="subtle" onClick={() => setPicked(sets.filter((s) => s.kind === 'identical').map(groupKey))}>
+              Les identiques
+            </Button>
+            <Button size="compact-sm" variant="subtle" disabled={!picked.length} onClick={() => setPicked([])}>
+              Aucun
+            </Button>
+            <Select
+              size="xs"
+              ml="auto"
+              w={270}
+              aria-label="Trace gardée dans chaque groupe"
+              allowDeselect={false}
+              value={keep}
+              onChange={(v) => setKeep((v as KeepRule) ?? 'oldest')}
+              data={[
+                { value: 'oldest', label: 'Garder la plus ancienne' },
+                { value: 'newest', label: 'Garder la plus récente' },
+                { value: 'richest', label: 'Garder celle qui a le plus de tags' },
+                { value: 'managed', label: 'Garder celle de la bibliothèque gérée' },
+              ]}
+            />
+            <Button size="compact-sm" color="orange" disabled={!picked.length || batchBusy != null} onClick={() => setConfirmBatch(true)}>
+              Mettre les autres de côté
+            </Button>
+            <Button
+              size="compact-sm"
+              variant="default"
+              disabled={!picked.length || batchBusy != null}
+              onClick={() => {
+                const chosen = sets.filter((s) => picked.includes(groupKey(s)))
+                setPicked([])
+                act(
+                  Promise.all(chosen.map((s) => api.markNotDuplicates(s.traces.map((t) => t.id)))),
+                  `${chosen.length} groupe(s) marqué(s) « pas des doublons ».`,
+                )
+              }}
+            >
+              Pas des doublons
+            </Button>
+          </Group>
+          {batchBusy && (
+            <Text size="xs" mt={4}>
+              {batchBusy}
+            </Text>
+          )}
+        </Paper>
+      )}
+
       {sets.length === 0 && (
         <Paper withBorder radius="md" p="md">
           <Text size="sm">Aucun doublon dans la bibliothèque.</Text>
@@ -106,6 +168,14 @@ export default function DuplicatesPage({ onOpen, onChanged }: { onOpen: (id: num
       {sets.map((s) => (
         <Paper key={s.traces.map((t) => t.id).join('-')} withBorder radius="md">
           <Group p="sm" gap="xs" style={{ borderBottom: '1px solid #f1f3f5' }}>
+            <Checkbox
+              aria-label="Sélectionner ce groupe"
+              checked={picked.includes(groupKey(s))}
+              onChange={(e) => {
+                const on = e.currentTarget.checked
+                setPicked((p) => (on ? [...p, groupKey(s)] : p.filter((k) => k !== groupKey(s))))
+              }}
+            />
             <Badge color={s.kind === 'identical' ? 'orange' : 'yellow'} variant="light">
               {s.kind === 'identical' ? 'Identiques' : 'Doublon probable'}
             </Badge>
@@ -136,6 +206,11 @@ export default function DuplicatesPage({ onOpen, onChanged }: { onOpen: (id: num
               {s.traces.map((t) => (
                 <Table.Tr key={t.id}>
                   <Table.Td style={{ wordBreak: 'break-all' }}>
+                    {picked.includes(groupKey(s)) && (
+                      <Badge size="xs" mr={6} color={keeper(s, keep, libraries)?.id === t.id ? 'green' : 'orange'} variant="light">
+                        {keeper(s, keep, libraries)?.id === t.id ? 'Gardée' : 'Mise de côté'}
+                      </Badge>
+                    )}
                     <Anchor size="sm" onClick={() => onOpen(t.id)}>
                       {t.path}
                     </Anchor>
@@ -165,6 +240,43 @@ export default function DuplicatesPage({ onOpen, onChanged }: { onOpen: (id: num
           </Table>
         </Paper>
       ))}
+
+      <Modal opened={confirmBatch} onClose={() => setConfirmBatch(false)} title="Mettre les doublons de côté">
+        <Stack gap="sm">
+          <Text size="sm">
+            Dans {picked.length} groupe(s), une trace est gardée ({KEEP_LABEL[keep]}) et les{' '}
+            {sets.filter((s) => picked.includes(groupKey(s))).reduce((n, s) => n + s.traces.length - 1, 0)} autres sont déplacées dans le dossier
+            caché « .organisons-doublons » de leur bibliothèque. Elles restent récupérables ; leurs tags, notes et collections dans l'appli sont
+            perdus.
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setConfirmBatch(false)}>
+              Annuler
+            </Button>
+            <Button
+              color="orange"
+              onClick={async () => {
+                setConfirmBatch(false)
+                setError(null)
+                const chosen = sets.filter((s) => picked.includes(groupKey(s)))
+                const moves = chosen.flatMap((s) => s.traces.filter((t) => t.id !== keeper(s, keep, libraries)?.id))
+                const failed: string[] = []
+                for (const [i, t] of moves.entries()) {
+                  setBatchBusy(`Mise de côté : ${i + 1} / ${moves.length}`)
+                  await api.setAsideDuplicate(t.id).catch((e) => failed.push(`${t.name} : ${e}`))
+                }
+                setBatchBusy(null)
+                setPicked([])
+                setDone(`${moves.length - failed.length} doublon(s) mis de côté dans ${chosen.length} groupe(s).`)
+                if (failed.length) setError(failed.slice(0, 5).join('\n'))
+                refresh()
+              }}
+            >
+              Mettre de côté
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
 
       <Modal opened={confirmPurge} onClose={() => setConfirmPurge(false)} title="Vider les doublons mis de côté">
         <Stack gap="sm">
@@ -217,4 +329,26 @@ export default function DuplicatesPage({ onOpen, onChanged }: { onOpen: (id: num
 /** Taille lisible (Mo avec une décimale, ko en dessous). */
 function mo(bytes: number) {
   return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1).replace('.', ',')} Mo` : `${Math.ceil(bytes / 1024)} ko`
+}
+
+type KeepRule = 'oldest' | 'newest' | 'richest' | 'managed'
+const KEEP_LABEL: Record<KeepRule, string> = {
+  oldest: 'la plus ancienne',
+  newest: 'la plus récente',
+  richest: 'celle qui a le plus de tags',
+  managed: 'celle de la bibliothèque gérée',
+}
+
+const groupKey = (s: DuplicateSet) => s.traces.map((t) => t.id).join('-')
+
+/** Trace gardée dans un groupe selon la règle (à égalité : la plus ancienne). */
+function keeper(s: DuplicateSet, rule: KeepRule, libraries: Library[]): TraceSummary | undefined {
+  const byAge = [...s.traces].sort((a, b) => a.addedAt - b.addedAt || a.id - b.id)
+  if (rule === 'newest') return byAge[byAge.length - 1]
+  if (rule === 'richest') return [...byAge].sort((a, b) => b.tags.length - a.tags.length)[0]
+  if (rule === 'managed') {
+    const managed = new Set(libraries.filter((l) => l.mode === 'managed').map((l) => l.id))
+    return byAge.find((t) => managed.has(t.libraryId)) ?? byAge[0]
+  }
+  return byAge[0]
 }

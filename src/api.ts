@@ -28,6 +28,8 @@ export interface OrganizeReport {
   imported: number
   errors: string[]
   importedIds: number[]
+  /** Non importés car déjà présents dans la bibliothèque. */
+  skipped: string[]
 }
 /** Fichier à importer comparé à la bibliothèque. */
 export interface ImportCheck {
@@ -152,6 +154,8 @@ export interface Collection {
   id: number
   name: string
   count: number
+  /** Tour : les traces sont des étapes ordonnées. */
+  isTour: boolean
 }
 
 export interface TagCount {
@@ -181,12 +185,24 @@ export const api = {
   trashTrace: (id: number) => invoke<string>('trash_trace', { id }),
   trashInfo: () => invoke<SetAsideInfo>('trash_info'),
   trashList: () => invoke<TrashItem[]>('trash_list'),
+  setAsideList: () => invoke<TrashItem[]>('set_aside_list'),
   restoreTrash: (path: string) => invoke<number>('restore_trash', { path }),
   purgeTrash: (olderThanDays?: number) => invoke<number>('purge_trash', { olderThanDays: olderThanDays ?? null }),
   getTrashPurgeDays: () => invoke<number>('get_trash_purge_days'),
   setTrashPurgeDays: (days: number) => invoke<void>('set_trash_purge_days', { days }),
   createTag: (name: string) => invoke<void>('create_tag', { name }),
   batchEdit: (ids: number[], edit: BatchEdit) => invoke<string[]>('batch_edit', { ids, edit }),
+  setCollectionTour: (id: number, isTour: boolean) => invoke<void>('set_collection_tour', { id, isTour }),
+  komootStatus: () => invoke<KomootAccount | null>('komoot_status'),
+  komootLogin: (email: string, password: string) => invoke<KomootAccount>('komoot_login', { email, password }),
+  komootLogout: () => invoke<void>('komoot_logout'),
+  komootTours: () => invoke<KomootTour[]>('komoot_tours'),
+  komootImport: (libraryId: number, ids: string[]) => invoke<OrganizeReport>('komoot_import', { libraryId, ids }),
+  openrunnerImport: (libraryId: number, links: string[]) => invoke<OrganizeReport>('openrunner_import', { libraryId, links }),
+  tourStages: (id: number) => invoke<TraceDetail[]>('tour_stages', { id }),
+  setTourOrder: (id: number, ordered: number[]) => invoke<void>('set_tour_order', { id, ordered }),
+  exportTourGpx: (id: number, path: string) => invoke<number>('export_tour_gpx', { id, path }),
+  exportTourStages: (id: number, dir: string) => invoke<string[]>('export_tour_stages', { id, dir }),
   setTagAuto: (tag: string, auto: boolean) => invoke<void>('set_tag_auto', { tag, auto }),
   setTagKeywords: (tag: string, keywords: string[]) => invoke<void>('set_tag_keywords', { tag, keywords }),
   setSurface: (id: number, ways: { tags: Record<string, string>; geometry: [number, number][] }[]) =>
@@ -239,4 +255,22 @@ export interface BatchEdit {
   /** Par nom ; créées si elles n'existent pas. */
   addCollections?: string[]
   removeCollections?: number[]
+}
+
+/** Compte Komoot connecté (le jeton reste côté Rust). */
+export interface KomootAccount {
+  email: string
+  displayName: string
+}
+
+/** Parcours du compte Komoot. */
+export interface KomootTour {
+  id: string
+  name: string
+  kind: 'planned' | 'recorded'
+  sport: string
+  distanceKm: number
+  elevationUp: number
+  date: string | null
+  imported: boolean
 }

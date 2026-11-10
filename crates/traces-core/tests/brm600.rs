@@ -434,3 +434,69 @@ fn modification_par_lot() {
     assert_eq!(idx.get(ids[0]).unwrap().summary.sport, "Vélo");
     assert_eq!(idx.collections().unwrap().into_iter().find(|c| c.id == col.id).unwrap().count, 1);
 }
+
+#[test]
+fn tours() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("PC");
+    std::fs::create_dir_all(&root).unwrap();
+    for f in ["etape-a.gpx", "etape-b.gpx", "etape-c.gpx"] {
+        std::fs::copy(fixture(), root.join(f)).unwrap();
+    }
+    let mut idx = Index::open_in_memory().unwrap();
+    let lib = idx.add_library("PC", &root.to_string_lossy(), "index", "", false).unwrap();
+    scan_library(&mut idx, &lib, 1_000).unwrap();
+    let ids: Vec<i64> = idx.list(&TraceFilter::default()).unwrap().iter().map(|t| t.id).collect();
+    let tour = idx.create_collection("Tour de Manche", 1_000).unwrap();
+    for id in &ids {
+        idx.set_trace_collections(*id, &[tour.id]).unwrap();
+    }
+    idx.set_collection_tour(tour.id, true).unwrap();
+    assert!(idx.collections().unwrap()[0].is_tour);
+    assert_eq!(idx.tour_stages(tour.id).unwrap().len(), 3);
+
+    // Ordre choisi, gardé quand une trace change d'autres collections.
+    let order = vec![ids[2], ids[0], ids[1]];
+    idx.set_tour_order(tour.id, &order).unwrap();
+    let other = idx.create_collection("Autre", 1_000).unwrap();
+    idx.set_trace_collections(ids[2], &[tour.id, other.id]).unwrap();
+    let stages: Vec<i64> = idx.tour_stages(tour.id).unwrap().iter().map(|t| t.summary.id).collect();
+    assert_eq!(stages, order);
+
+    // Export en un GPX : une piste par étape, numérotée, avec tous les POI.
+    let out = dir.path().join("tour.gpx");
+    assert_eq!(tour::export_tour_gpx(&idx, tour.id, &out).unwrap(), 3);
+    let g = gpx::read(std::io::BufReader::new(std::fs::File::open(&out).unwrap())).unwrap();
+    assert_eq!(g.tracks.len(), 3);
+    assert!(g.tracks[0].name.as_deref().unwrap().starts_with("01 - "));
+    assert_eq!(g.waypoints.len(), 3 * 182);
+    let a = analyze_file(&out).unwrap();
+    assert_eq!(a.point_count, 3 * 14322);
+
+    // Étape par étape, dans un dossier.
+    let files = tour::export_tour_stages(&idx, tour.id, &dir.path().join("export")).unwrap();
+    assert_eq!(files.len(), 3);
+    assert!(files[0].ends_with("01 - BRM 600 Tour de Manche.gpx"), "{files:?}");
+}
+
+#[test]
+fn doublons_mis_de_cote_restaures() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("NAS");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::copy(fixture(), root.join("a.gpx")).unwrap();
+    std::fs::copy(fixture(), root.join("b.gpx")).unwrap();
+    let mut idx = Index::open_in_memory().unwrap();
+    let lib = idx.add_library("NAS", &root.to_string_lossy(), "managed", "", false).unwrap();
+    scan_library(&mut idx, &lib, 1_000).unwrap();
+    let id = idx.list(&TraceFilter::default()).unwrap()[0].id;
+    organize::set_aside(&idx, id, 1_777_593_600).unwrap();
+
+    // Listés à part de la corbeille, puis restaurés à la racine.
+    assert!(organize::trash_list(&idx).unwrap().is_empty());
+    let items = organize::set_aside_list(&idx).unwrap();
+    assert_eq!(items.len(), 1);
+    organize::restore_from_trash(&mut idx, &items[0].path, 1_777_593_600).unwrap();
+    assert_eq!(idx.count().unwrap(), 2);
+    assert!(organize::set_aside_list(&idx).unwrap().is_empty());
+}

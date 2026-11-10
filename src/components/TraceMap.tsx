@@ -12,6 +12,8 @@ interface Props {
   colors: string[]
   /** Partie de la trace visible sur la carte (km), ou null si elle est entière. */
   onView?: (range: [number, number] | null) => void
+  /** Partie de la trace entourée d’un léger halo lumineux (étape survolée d’un tour), en [lon, lat]. */
+  glow?: [number, number][] | null
 }
 
 const ll = (p: ProfilePoint) => [p.lon, p.lat] as [number, number]
@@ -19,7 +21,7 @@ const ll = (p: ProfilePoint) => [p.lon, p.lat] as [number, number]
 /** En dessous de ce zoom, les noms des POI se chevauchent : on n'affiche que les pastilles. */
 const POI_LABEL_MIN_ZOOM = 11
 
-export default function TraceMap({ profile, pois, cursor, colors, onView }: Props) {
+export default function TraceMap({ profile, pois, cursor, colors, onView, glow }: Props) {
   const { container, map, fitTo } = useMapLibre()
   const markers = useRef<maplibregl.Marker[]>([])
   const poiMarkers = useRef<maplibregl.Marker[]>([])
@@ -162,6 +164,24 @@ export default function TraceMap({ profile, pois, cursor, colors, onView }: Prop
       map.off('moveend', update)
     }
   }, [map, profile, total, onView])
+
+  // Halo lumineux sous la partie survolée (étape d’un tour).
+  useEffect(() => {
+    if (!map || !map.getLayer("track-halo")) return
+    setGeoJson(map, "glow", line(glow ?? []))
+    if (!map.getLayer("glow")) {
+      map.addLayer(
+        {
+          id: "glow",
+          type: "line",
+          source: "glow",
+          layout: { "line-join": "round", "line-cap": "round" },
+          paint: { "line-color": "#ffe066", "line-width": 16, "line-blur": 7, "line-opacity": 0.85 },
+        },
+        "track-halo",
+      )
+    }
+  }, [map, glow, profile])
 
   // Curseur du profil → point et partie parcourue sur la carte.
   useEffect(() => {

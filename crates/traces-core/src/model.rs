@@ -253,6 +253,8 @@ pub struct Collection {
     pub id: i64,
     pub name: String,
     pub count: i64,
+    /// Tour : les traces sont des étapes, dans un ordre choisi.
+    pub is_tour: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -295,6 +297,9 @@ pub struct OrganizeReport {
     /// Traces importées (pour proposer leurs tags juste après).
     #[serde(default)]
     pub imported_ids: Vec<i64>,
+    /// Fichiers non importés car déjà présents (« nom : déjà présent comme … »).
+    #[serde(default)]
+    pub skipped: Vec<String>,
     pub moved: usize,
     pub imported: usize,
     pub errors: Vec<String>,

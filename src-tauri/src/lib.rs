@@ -3,7 +3,10 @@
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
+
+mod komoot;
+mod openrunner;
 use traces_core::scan::{scan_library, write_trace_meta};
 use traces_core::{
     organize, sport, surface, Collection, DuplicateGroup, DuplicateSet, Index, Library, OrganizeReport, PlannedMove,
@@ -176,6 +179,187 @@ fn batch_edit(state: State<AppState>, ids: Vec<i64>, edit: traces_core::BatchEdi
     let mut index = state.index.lock().map_err(err)?;
     let changed = index.batch_edit(&ids, &edit, now()).map_err(err)?;
     Ok(changed.into_iter().filter_map(|id| sync_gpx(&index, id).err()).collect())
+}
+
+/// Compte Komoot connecté (sans le jeton), ou rien.
+#[tauri::command]
+fn komoot_status() -> Option<komoot::AccountInfo> {
+    komoot::load().as_ref().map(Into::into)
+}
+
+/// Connexion à Komoot : le mot de passe n’est utilisé qu’une fois, pour obtenir un jeton.
+#[tauri::command]
+async fn komoot_login(email: String, password: String) -> CmdResult<komoot::AccountInfo> {
+    let account = tauri::async_runtime::spawn_blocking(move || komoot::login(&email, &password)).await.map_err(err)??;
+    Ok((&account).into())
+}
+
+#[tauri::command]
+fn komoot_logout() -> CmdResult<()> {
+    komoot::logout()
+}
+
+/// Avancement envoyé à l’interface pendant une opération Komoot.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KomootProgress {
+    /// "list" (lecture de la liste) ou "import"
+    phase: &'static str,
+    done: usize,
+    total: usize,
+}
+
+/// Parcours du compte Komoot, avec ceux déjà importés.
+#[tauri::command]
+async fn komoot_tours(app: tauri::AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<komoot::Tour>> {
+    let account = komoot::load().ok_or("Pas connecté à Komoot.")?;
+    let mut tours = tauri::async_runtime::spawn_blocking(move || {
+        komoot::tours(&account, |done| {
+            let _ = app.emit("komoot-progress", KomootProgress { phase: "list", done, total: 0 });
+        })
+    })
+    .await
+    .map_err(err)??;
+    let done = state.index.lock().map_err(err)?.external_imports("komoot").map_err(err)?;
+    for t in &mut tours {
+        t.imported = done.contains(&t.id);
+    }
+    Ok(tours)
+}
+
+/// Télécharge des parcours Komoot et les importe un par un dans une bibliothèque
+/// gérée, en envoyant l’avancement. L’index n’est verrouillé que le temps
+/// d’importer chaque parcours : le reste de l’appli reste utilisable.
+#[tauri::command]
+async fn komoot_import(app: tauri::AppHandle, library_id: i64, ids: Vec<String>) -> CmdResult<OrganizeReport> {
+    let account = komoot::load().ok_or("Pas connecté à Komoot.")?;
+    let dir = app.path().app_cache_dir().map_err(err)?.join("komoot");
+    std::fs::create_dir_all(&dir).map_err(err)?;
+    tauri::async_runtime::spawn_blocking(move || -> CmdResult<OrganizeReport> {
+        let lib = app.state::<AppState>().index.lock().map_err(err)?.library(library_id).map_err(err)?;
+        let total = ids.len();
+        let mut report = OrganizeReport::default();
+        let _ = app.emit("komoot-progress", KomootProgress { phase: "import", done: 0, total });
+        for (n, id) in ids.iter().enumerate() {
+            let path = dir.join(format!("{id}.gpx"));
+            match komoot::download(&account, id, &path) {
+                Err(e) => report.errors.push(format!("Parcours Komoot {id} : {e}")),
+                Ok(()) => {
+                    let state = app.state::<AppState>();
+                    let mut index = state.index.lock().map_err(err)?;
+                    import_one(&mut index, &lib, &path, "komoot", id, &mut report)?;
+                }
+            }
+            let _ = app.emit("komoot-progress", KomootProgress { phase: "import", done: n + 1, total });
+        }
+        Ok(report)
+    })
+    .await
+    .map_err(err)?
+}
+
+/// Importe un GPX téléchargé (Komoot, Openrunner) dans la bibliothèque, sauf s'il
+/// y est déjà : même fichier, ou même parcours (critères des Doublons), par
+/// exemple exporté à la main auparavant. Dans ce cas il est ignoré et noté comme
+/// importé, pour ne plus être proposé. Le fichier téléchargé est ensuite supprimé.
+fn import_one(
+    index: &mut Index,
+    lib: &Library,
+    path: &std::path::Path,
+    source: &str,
+    external_id: &str,
+    report: &mut OrganizeReport,
+) -> CmdResult<()> {
+    let file = path.to_string_lossy().to_string();
+    let check = organize::check_import(index, std::slice::from_ref(&file)).map_err(err)?.into_iter().next();
+    match check {
+        Some(c) if c.status == "identical" || c.status == "probable" => {
+            report.skipped.push(format!("{} : déjà présent ({})", c.name, c.matches.join(", ")));
+            index.mark_external_import(source, external_id, "", now()).map_err(err)?;
+        }
+        _ => {
+            let one = organize::import_files(index, lib, &[file], now()).map_err(err)?;
+            if let Some(&trace) = one.imported_ids.first() {
+                let saved = index.get(trace).map_err(err)?.summary.path;
+                index.mark_external_import(source, external_id, &saved, now()).map_err(err)?;
+            }
+            report.imported += one.imported;
+            report.imported_ids.extend(one.imported_ids);
+            report.errors.extend(one.errors);
+        }
+    }
+    let _ = std::fs::remove_file(path);
+    Ok(())
+}
+
+/// Importe des parcours Openrunner à partir de leurs liens (parcours publics),
+/// un par un, avec l’avancement (« openrunner-progress »).
+#[tauri::command]
+async fn openrunner_import(app: tauri::AppHandle, library_id: i64, links: Vec<String>) -> CmdResult<OrganizeReport> {
+    let dir = app.path().app_cache_dir().map_err(err)?.join("openrunner");
+    std::fs::create_dir_all(&dir).map_err(err)?;
+    tauri::async_runtime::spawn_blocking(move || -> CmdResult<OrganizeReport> {
+        let (lib, done) = {
+            let state = app.state::<AppState>();
+            let index = state.index.lock().map_err(err)?;
+            (index.library(library_id).map_err(err)?, index.external_imports("openrunner").map_err(err)?)
+        };
+        let links: Vec<&String> = links.iter().filter(|l| !l.trim().is_empty()).collect();
+        let total = links.len();
+        let mut report = OrganizeReport::default();
+        for (n, link) in links.iter().enumerate() {
+            let _ = app.emit("openrunner-progress", KomootProgress { phase: "import", done: n, total });
+            let Some(id) = openrunner::route_id(link) else {
+                report.errors.push(format!("{} : ce n’est pas un lien de parcours Openrunner", link.trim()));
+                continue;
+            };
+            if done.contains(&id) {
+                report.errors.push(format!("Parcours {id} : déjà importé"));
+                continue;
+            }
+            let path = dir.join(format!("{id}.gpx"));
+            if let Err(e) = openrunner::download(&id, &path) {
+                report.errors.push(format!("Parcours {id} : {e}"));
+                continue;
+            }
+            let state = app.state::<AppState>();
+            let mut index = state.index.lock().map_err(err)?;
+            import_one(&mut index, &lib, &path, "openrunner", &id, &mut report)?;
+        }
+        let _ = app.emit("openrunner-progress", KomootProgress { phase: "import", done: total, total });
+        Ok(report)
+    })
+    .await
+    .map_err(err)?
+}
+
+/// Fait d’une collection un tour (étapes ordonnées) ou l’inverse.
+#[tauri::command]
+fn set_collection_tour(state: State<AppState>, id: i64, is_tour: bool) -> CmdResult<()> {
+    state.index.lock().map_err(err)?.set_collection_tour(id, is_tour).map_err(err)
+}
+
+/// Étapes d’un tour, dans l’ordre, avec leur profil et leurs POI.
+#[tauri::command]
+fn tour_stages(state: State<AppState>, id: i64) -> CmdResult<Vec<TraceDetail>> {
+    state.index.lock().map_err(err)?.tour_stages(id).map_err(err)
+}
+
+#[tauri::command]
+fn set_tour_order(state: State<AppState>, id: i64, ordered: Vec<i64>) -> CmdResult<()> {
+    state.index.lock().map_err(err)?.set_tour_order(id, &ordered).map_err(err)
+}
+
+/// Exporte le tour en un seul GPX (une piste par étape) ; renvoie le nombre d’étapes.
+#[tauri::command]
+fn export_tour_gpx(state: State<AppState>, id: i64, path: String) -> CmdResult<usize> {
+    traces_core::tour::export_tour_gpx(&*state.index.lock().map_err(err)?, id, std::path::Path::new(&path)).map_err(err)
+}
+
+/// Copie chaque étape dans un dossier (« 01 - nom.gpx »…).
+#[tauri::command]
+fn export_tour_stages(state: State<AppState>, id: i64, dir: String) -> CmdResult<Vec<String>> {
+    traces_core::tour::export_tour_stages(&*state.index.lock().map_err(err)?, id, std::path::Path::new(&dir)).map_err(err)
 }
 
 /// Crée un tag sans trace (onglet Tags).
@@ -354,7 +538,13 @@ fn trash_list(state: State<AppState>) -> CmdResult<Vec<traces_core::TrashItem>> 
     organize::trash_list(&*state.index.lock().map_err(err)?).map_err(err)
 }
 
-/// Remet une trace de la corbeille dans sa bibliothèque ; renvoie son identifiant.
+/// Doublons mis de côté (`.organisons-doublons`), le plus récent d’abord.
+#[tauri::command]
+fn set_aside_list(state: State<AppState>) -> CmdResult<Vec<traces_core::TrashItem>> {
+    organize::set_aside_list(&*state.index.lock().map_err(err)?).map_err(err)
+}
+
+/// Remet une trace de la corbeille ou des doublons mis de côté dans sa bibliothèque ; renvoie son identifiant.
 #[tauri::command]
 fn restore_trash(state: State<AppState>, path: String) -> CmdResult<i64> {
     let mut index = state.index.lock().map_err(err)?;
@@ -469,12 +659,24 @@ pub fn run() {
             offline_libraries,
             create_tag,
             batch_edit,
+            set_collection_tour,
+            komoot_status,
+            komoot_login,
+            komoot_logout,
+            komoot_tours,
+            komoot_import,
+            openrunner_import,
+            tour_stages,
+            set_tour_order,
+            export_tour_gpx,
+            export_tour_stages,
             set_tag_auto,
             set_tag_keywords,
             trash_trace,
             trash_info,
             purge_trash,
             trash_list,
+            set_aside_list,
             restore_trash,
             get_trash_purge_days,
             set_trash_purge_days,

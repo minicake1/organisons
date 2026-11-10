@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Button, Code, Group, Loader, Paper, Stack, Table, Text, Title, Tooltip } from '@mantine/core'
+import { Button, Code, Group, Loader, Paper, SegmentedControl, Stack, Table, Text, Title, Tooltip } from '@mantine/core'
 import { IconRestore } from '@tabler/icons-react'
 import { api, type TrashItem } from '../api'
 import TrashPanel from '../components/TrashPanel'
@@ -16,14 +16,15 @@ export default function TrashPage({ onOpen, onChanged }: { onOpen: (id: number) 
   const [error, setError] = useState<string | null>(null)
   const [restored, setRestored] = useState<{ id: number; name: string } | null>(null)
 
-  const refresh = () => {
-    api
-      .trashList()
+  // Corbeille (traces supprimées) ou doublons mis de côté (onglet Doublons).
+  const [view, setView] = useState<"trash" | "aside">("trash")
+  const refresh = (which = view) => {
+    ;(which === "trash" ? api.trashList() : api.setAsideList())
       .then(setItems)
       .catch((e) => setError(String(e)))
     onChanged()
   }
-  useEffect(refresh, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => refresh(view), [view]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const restore = async (it: TrashItem) => {
     setBusy(it.path)
@@ -43,7 +44,27 @@ export default function TrashPage({ onOpen, onChanged }: { onOpen: (id: number) 
   return (
     <Stack gap="md" maw={1100}>
       <Title order={2}>Corbeille</Title>
-      <TrashPanel version={version} onChanged={refresh} />
+      <SegmentedControl
+        w="fit-content"
+        value={view}
+        onChange={(v) => {
+          setItems(null)
+          setRestored(null)
+          setView(v as "trash" | "aside")
+        }}
+        data={[
+          { value: "trash", label: "Traces supprimées" },
+          { value: "aside", label: "Doublons mis de côté" },
+        ]}
+      />
+      {view === "trash" ? (
+        <TrashPanel version={version} onChanged={() => refresh()} />
+      ) : (
+        <Text size="sm" c="dimmed">
+          Doublons mis de côté depuis l’onglet Doublons, dans le dossier <Code>.organisons-doublons</Code> de chaque bibliothèque. Leur vidage
+          (manuel ou automatique) se règle dans l’onglet Doublons.
+        </Text>
+      )}
       {error && (
         <Text c="red" size="sm">
           {error}
@@ -66,7 +87,7 @@ export default function TrashPage({ onOpen, onChanged }: { onOpen: (id: number) 
           <Loader m="md" />
         ) : items.length === 0 ? (
           <Text p="md" c="dimmed" size="sm">
-            La corbeille est vide.
+            {view === "trash" ? "La corbeille est vide." : "Aucun doublon mis de côté."}
           </Text>
         ) : (
           <Table verticalSpacing="xs" highlightOnHover>
@@ -74,7 +95,7 @@ export default function TrashPage({ onOpen, onChanged }: { onOpen: (id: number) 
               <Table.Tr>
                 <Table.Th>Trace</Table.Th>
                 <Table.Th>Bibliothèque</Table.Th>
-                <Table.Th w={130}>Supprimée le</Table.Th>
+                <Table.Th w={130}>{view === "trash" ? "Supprimée le" : "Mise de côté le"}</Table.Th>
                 <Table.Th w={90}>Taille</Table.Th>
                 <Table.Th w={130} />
               </Table.Tr>

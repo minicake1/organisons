@@ -19,3 +19,8 @@ tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 serde.workspace = true
 serde_json.workspace = true
+# Komoot (API interne, non officielle) : requêtes HTTP et jeton rangé dans le
+# gestionnaire d'identifiants de Windows.
+ureq = "2"
+base64 = "0.22"
+keyring = { version = "3", features = ["windows-native"] }

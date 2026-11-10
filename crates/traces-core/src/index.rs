@@ -79,6 +79,14 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL
 );
 -- Paires de traces que l'utilisateur a déclarées « pas des doublons » (a < b).
+-- Parcours déjà importés depuis un service (Komoot…), pour ne pas les reprendre.
+CREATE TABLE IF NOT EXISTS external_imports (
+    source      TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    path        TEXT NOT NULL,
+    imported_at INTEGER NOT NULL,
+    PRIMARY KEY (source, external_id)
+);
 -- Tags créés depuis l’onglet Tags, pas encore posés sur une trace.
 CREATE TABLE IF NOT EXISTS tag_names (
     tag TEXT PRIMARY KEY
@@ -167,6 +175,8 @@ impl Index {
             ("traces", "hint_text", "TEXT NOT NULL DEFAULT ''"),
             ("tag_names", "auto", "INTEGER NOT NULL DEFAULT 0"),
             ("tag_names", "keywords", "TEXT NOT NULL DEFAULT '[]'"),
+            ("collections", "is_tour", "INTEGER NOT NULL DEFAULT 0"),
+            ("collection_traces", "position", "INTEGER NOT NULL DEFAULT 0"),
         ] {
             let exists: bool = self.conn.query_row(
                 &format!("SELECT COUNT(*) > 0 FROM pragma_table_info('{table}') WHERE name = ?1"),
@@ -286,10 +296,12 @@ impl Index {
 
     pub fn collections(&self) -> Result<Vec<Collection>> {
         let mut st = self.conn.prepare(
-            "SELECT c.id, c.name, (SELECT COUNT(*) FROM collection_traces ct WHERE ct.collection_id = c.id)
+            "SELECT c.id, c.name, (SELECT COUNT(*) FROM collection_traces ct WHERE ct.collection_id = c.id), c.is_tour
              FROM collections c ORDER BY c.name COLLATE NOCASE",
         )?;
-        let rows = st.query_map([], |r| Ok(Collection { id: r.get(0)?, name: r.get(1)?, count: r.get(2)? }))?;
+        let rows = st.query_map([], |r| {
+            Ok(Collection { id: r.get(0)?, name: r.get(1)?, count: r.get(2)?, is_tour: r.get(3)? })
+        })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
@@ -301,7 +313,7 @@ impl Index {
         self.conn
             .execute("INSERT INTO collections(name, created_at) VALUES (?1, ?2)", params![name, now])
             .map_err(|e| unique_err(e, "une collection porte déjà ce nom"))?;
-        Ok(Collection { id: self.conn.last_insert_rowid(), name: name.into(), count: 0 })
+        Ok(Collection { id: self.conn.last_insert_rowid(), name: name.into(), count: 0, is_tour: false })
     }
 
     pub fn rename_collection(&self, id: i64, name: &str) -> Result<()> {
@@ -323,10 +335,18 @@ impl Index {
 
     pub fn set_trace_collections(&mut self, trace_id: i64, ids: &[i64]) -> Result<()> {
         let tx = self.conn.transaction()?;
-        tx.execute("DELETE FROM collection_traces WHERE trace_id = ?1", [trace_id])?;
+        // On ne retire que les collections quittées : l'ordre des étapes d'un tour est gardé.
+        // (Liste en JSON : vide, elle retire bien tout ; « NOT IN (NULL) » ne retirerait rien.)
+        tx.execute(
+            "DELETE FROM collection_traces WHERE trace_id = ?1
+               AND collection_id NOT IN (SELECT value FROM json_each(?2))",
+            params![trace_id, serde_json::to_string(ids)?],
+        )?;
         for c in ids {
+            // Nouvelle étape : à la fin du tour.
             tx.execute(
-                "INSERT OR IGNORE INTO collection_traces(collection_id, trace_id) VALUES (?1, ?2)",
+                "INSERT OR IGNORE INTO collection_traces(collection_id, trace_id, position)
+                 VALUES (?1, ?2, (SELECT COALESCE(MAX(position), 0) + 1 FROM collection_traces WHERE collection_id = ?1))",
                 params![c, trace_id],
             )?;
         }
@@ -1185,5 +1205,74 @@ impl Index {
             }
         }
         Ok(tags_changed)
+    }
+}
+
+impl Index {
+    /// Fait d'une collection un tour (ou l'inverse). En devenant un tour, ses
+    /// traces sont numérotées dans l'ordre de leur date, puis de leur nom.
+    pub fn set_collection_tour(&mut self, id: i64, is_tour: bool) -> Result<()> {
+        self.conn.execute("UPDATE collections SET is_tour = ?2 WHERE id = ?1", params![id, is_tour])?;
+        if is_tour {
+            let stages = self.list(&TraceFilter { collection: Some(id), ..Default::default() })?;
+            let mut rows: Vec<(i64, i64, String)> = Vec::new();
+            for t in stages {
+                let date: i64 = self.conn.query_row(
+                    "SELECT COALESCE(gpx_date, file_mtime) FROM traces WHERE id = ?1",
+                    [t.id],
+                    |r| r.get(0),
+                )?;
+                rows.push((t.id, date, t.name));
+            }
+            rows.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| natural_cmp(&a.2, &b.2)));
+            let ids: Vec<i64> = rows.into_iter().map(|r| r.0).collect();
+            self.set_tour_order(id, &ids)?;
+        }
+        Ok(())
+    }
+
+    /// Étapes d'un tour, dans l'ordre.
+    pub fn tour_stages(&self, id: i64) -> Result<Vec<TraceDetail>> {
+        let mut st = self
+            .conn
+            .prepare("SELECT trace_id FROM collection_traces WHERE collection_id = ?1 ORDER BY position, trace_id")?;
+        let ids = st.query_map([id], |r| r.get(0))?.collect::<std::result::Result<Vec<i64>, _>>()?;
+        ids.into_iter().map(|t| self.get(t)).collect()
+    }
+
+    /// Nouvel ordre des étapes (les traces absentes de la liste gardent leur place, à la fin).
+    pub fn set_tour_order(&mut self, id: i64, ordered: &[i64]) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        for (i, t) in ordered.iter().enumerate() {
+            tx.execute(
+                "UPDATE collection_traces SET position = ?3 WHERE collection_id = ?1 AND trace_id = ?2",
+                params![id, t, i as i64 + 1],
+            )?;
+        }
+        tx.execute(
+            "UPDATE collection_traces SET position = position + ?2 WHERE collection_id = ?1
+               AND trace_id NOT IN (SELECT value FROM json_each(?3))",
+            params![id, ordered.len() as i64, serde_json::to_string(ordered)?],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+}
+
+impl Index {
+    /// Identifiants déjà importés depuis un service (ex. « komoot »).
+    pub fn external_imports(&self, source: &str) -> Result<std::collections::HashSet<String>> {
+        let mut st = self.conn.prepare("SELECT external_id FROM external_imports WHERE source = ?1")?;
+        let ids = st.query_map([source], |r| r.get(0))?.collect::<std::result::Result<_, _>>()?;
+        Ok(ids)
+    }
+
+    pub fn mark_external_import(&self, source: &str, external_id: &str, path: &str, now: i64) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO external_imports(source, external_id, path, imported_at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(source, external_id) DO UPDATE SET path = excluded.path, imported_at = excluded.imported_at",
+            params![source, external_id, path, now],
+        )?;
+        Ok(())
     }
 }

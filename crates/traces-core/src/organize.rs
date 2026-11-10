@@ -398,11 +398,21 @@ fn original_name(file: &str) -> String {
     }
 }
 
-/// Contenu de la corbeille, le plus récent d'abord.
+/// Contenu de la corbeille, le plus récent d’abord.
 pub fn trash_list(index: &Index) -> Result<Vec<crate::model::TrashItem>> {
+    aside_list(index, TRASH_DIR)
+}
+
+/// Doublons mis de côté (`.organisons-doublons`), le plus récent d’abord.
+pub fn set_aside_list(index: &Index) -> Result<Vec<crate::model::TrashItem>> {
+    aside_list(index, SET_ASIDE_DIR)
+}
+
+/// Fichiers d’un dossier de côté (corbeille ou doublons) de toutes les bibliothèques.
+fn aside_list(index: &Index, dir_name: &str) -> Result<Vec<crate::model::TrashItem>> {
     let mut out = Vec::new();
     for lib in index.libraries()? {
-        let dir = PathBuf::from(&lib.path).join(TRASH_DIR);
+        let dir = PathBuf::from(&lib.path).join(dir_name);
         let Ok(entries) = fs::read_dir(&dir) else { continue };
         for e in entries.flatten() {
             let p = e.path();
@@ -429,7 +439,7 @@ pub fn trash_list(index: &Index) -> Result<Vec<crate::model::TrashItem>> {
     Ok(out)
 }
 
-/// Restaure un fichier de la corbeille : il revient à la racine de sa
+/// Restaure un fichier de la corbeille ou des doublons mis de côté : il revient à la racine de sa
 /// bibliothèque sous son nom d'origine (« Ranger » le remettra à sa place) et
 /// la trace est de nouveau indexée. Renvoie l'identifiant de la trace.
 pub fn restore_from_trash(index: &mut Index, path: &str, now: i64) -> Result<i64> {
@@ -438,8 +448,11 @@ pub fn restore_from_trash(index: &mut Index, path: &str, now: i64) -> Result<i64
     let lib = index
         .libraries()?
         .into_iter()
-        .find(|l| from.parent() == Some(PathBuf::from(&l.path).join(TRASH_DIR).as_path()))
-        .ok_or_else(|| crate::Error::Invalid("Ce fichier n'est pas dans une corbeille d'Organisons.".into()))?;
+        .find(|l| {
+            let root = PathBuf::from(&l.path);
+            from.parent() == Some(root.join(TRASH_DIR).as_path()) || from.parent() == Some(root.join(SET_ASIDE_DIR).as_path())
+        })
+        .ok_or_else(|| crate::Error::Invalid("Ce fichier n'est ni dans une corbeille ni dans les doublons mis de côté d'Organisons.".into()))?;
     let root = PathBuf::from(&lib.path);
     let file = from.file_name().map(|f| original_name(&f.to_string_lossy())).unwrap_or_else(|| "trace.gpx".into());
     let to = unique(root.join(file), &HashSet::new());
