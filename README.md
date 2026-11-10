@@ -98,7 +98,7 @@ Les autres appareils GPS sont à l’étude.
 
 ### Avec l'installateur (Windows)
 
-Lancer `Organisons_<version>_x64_fr-FR.msi` ou `Organisons_<version>_x64-setup.exe`. L'appli s'installe dans `C:\Program Files\Organisons`. Elle utilise WebView2, déjà présent sur Windows 11.
+Télécharger `Organisons_<version>_x64_fr-FR.msi` ou `Organisons_<version>_x64-setup.exe` sur la page [Releases](https://github.com/minicake1/organisons/releases), puis le lancer. L'appli s'installe dans `C:\Program Files\Organisons`. Elle utilise WebView2, déjà présent sur Windows 11. Les installateurs ne sont pas signés : Windows SmartScreen peut afficher un avertissement (« Informations complémentaires » → « Exécuter quand même »).
 
 ### Depuis les sources
 
