@@ -32,6 +32,7 @@ import {
   IconLayoutSidebar,
   IconList,
   IconArrowLeft,
+  IconDeviceWatch,
   IconMap,
   IconPencil,
   IconSquareCheck,
@@ -43,6 +44,7 @@ import { HILLINESS, WINDS, date, int, km1, windLabel, windShort } from '../label
 import SportBadge from '../components/SportBadge'
 import TrashButton from '../components/TrashButton'
 import BatchEditModal from '../components/BatchEditModal'
+import { sendToKaroo } from '../sendToKaroo'
 import TrackThumb from '../components/TrackThumb'
 import ManagedActions from '../components/ManagedActions'
 import WindArrow from '../components/WindArrow'
@@ -83,6 +85,12 @@ export default function LibraryPage({
   const [selecting, setSelecting] = useState(false)
   const [picked, setPicked] = useState<number[]>([])
   const [batchOpen, setBatchOpen] = useState(false)
+  // Compte Hammerhead connecté : envoi de la sélection vers le Karoo.
+  const [karoo, setKaroo] = useState(false)
+  const [karooBusy, setKarooBusy] = useState<string | null>(null)
+  useEffect(() => {
+    api.hammerheadStatus().then((s) => setKaroo(s.connected)).catch(() => {})
+  }, [])
   const toggle = (id: number) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]))
   // Bibliothèques injoignables (NAS éteint) : consultation seule.
   const [offline, setOffline] = useState<number[]>([])
@@ -241,7 +249,31 @@ export default function LibraryPage({
             <Button size="compact-sm" variant="subtle" onClick={() => setPicked([])} disabled={!picked.length}>
               Aucune
             </Button>
-            <Button size="compact-sm" ml="auto" leftSection={<IconPencil size={14} />} disabled={!picked.length} onClick={() => setBatchOpen(true)}>
+            {karoo && (
+              <Button
+                size="compact-sm"
+                ml="auto"
+                variant="light"
+                leftSection={<IconDeviceWatch size={14} />}
+                disabled={!picked.length || karooBusy != null}
+                loading={karooBusy != null}
+                onClick={async () => {
+                  setKarooBusy("…")
+                  try {
+                    const { text, report } = await sendToKaroo(picked, (d, n) => setKarooBusy(`${d} / ${n}`))
+                    setNotice(text)
+                    if (report.errors.length) setError(report.errors.slice(0, 5).join(" / "))
+                  } catch (e) {
+                    setError(String(e))
+                  } finally {
+                    setKarooBusy(null)
+                  }
+                }}
+              >
+                Envoyer vers le Karoo{karooBusy ? ` (${karooBusy})` : ""}
+              </Button>
+            )}
+            <Button size="compact-sm" ml={karoo ? undefined : "auto"} leftSection={<IconPencil size={14} />} disabled={!picked.length} onClick={() => setBatchOpen(true)}>
               Modifier tags, sport, collections…
             </Button>
           </Group>
@@ -384,7 +416,7 @@ export default function LibraryPage({
       )}
 
       {traces.length > 0 && view === 'grid' && (
-        <SimpleGrid cols={{ base: 1, sm: 2, lg: 3, xl: 4 }}>
+        <Box className="tile-grid">
           {traces.map((t) => (
             <Card
               key={t.id}
@@ -420,7 +452,7 @@ export default function LibraryPage({
               </Stack>
             </Card>
           ))}
-        </SimpleGrid>
+        </Box>
       )}
       {traces.length > 0 && view === 'grid' && (
         <Text size="xs" c="dimmed" ta="right">

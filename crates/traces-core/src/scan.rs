@@ -27,6 +27,7 @@ pub fn scan_library(index: &mut Index, library: &Library, now: i64) -> Result<Sc
     let mut report = ScanReport::default();
     let mut seen = HashSet::new();
     let mut walk_failed = false;
+    let mut seen_workouts = HashSet::new();
     let walker = WalkDir::new(&library.path).follow_links(true).into_iter().filter_entry(|e| {
         e.depth() == 0 || !e.file_name().to_string_lossy().starts_with('.')
     });
@@ -41,6 +42,16 @@ pub fn scan_library(index: &mut Index, library: &Library, now: i64) -> Result<Sc
         };
         let path = entry.path();
         let is_gpx = path.extension().map(|x| x.eq_ignore_ascii_case("gpx")).unwrap_or(false);
+        let is_zwo = path.extension().map(|x| x.eq_ignore_ascii_case("zwo")).unwrap_or(false);
+        if entry.file_type().is_file() && is_zwo {
+            // Entraînement Zwift : indexé à part (onglet Entraînements).
+            let key = path.to_string_lossy().to_string();
+            seen_workouts.insert(key.clone());
+            if let Err(e) = index_workout(index, library, path, &key, now) {
+                report.errors.push(e.to_string());
+            }
+            continue;
+        }
         if !entry.file_type().is_file() || !is_gpx {
             continue;
         }
@@ -58,6 +69,7 @@ pub fn scan_library(index: &mut Index, library: &Library, now: i64) -> Result<Sc
         report.errors.push(format!("{} : lecture incomplète, aucune trace retirée de l’index", library.name));
     } else {
         report.removed = index.remove_missing(library.id, &seen)?;
+        index.remove_missing_workouts(library.id, &seen_workouts)?;
     }
     Ok(report)
 }
@@ -155,4 +167,17 @@ pub fn sha256_file(path: &Path) -> Result<String> {
         h.update(&buf[..n]);
     }
     Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// Indexe un entraînement `.zwo` (relu seulement si sa taille ou sa date a changé).
+pub(crate) fn index_workout(index: &Index, library: &Library, path: &Path, key: &str, now: i64) -> Result<()> {
+    let meta = fs::metadata(path).map_err(|source| Error::Io { path: path.to_owned(), source })?;
+    let size = meta.len() as i64;
+    let mtime = meta.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64).unwrap_or(0);
+    if index.workout_state(key)? == Some((size, mtime)) {
+        return Ok(());
+    }
+    let w = crate::workout::read_zwo(path)?;
+    index.upsert_workout(library.id, key, size, mtime, &w, now)?;
+    Ok(())
 }

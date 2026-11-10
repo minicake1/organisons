@@ -422,3 +422,15 @@ pub struct BatchEdit {
     pub add_collections: Vec<String>,
     pub remove_collections: Vec<i64>,
 }
+
+/// Entraînement (.zwo) de la bibliothèque.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkoutSummary {
+    pub id: i64,
+    pub library_id: i64,
+    pub path: String,
+    #[serde(flatten)]
+    pub workout: crate::workout::Workout,
+    pub added_at: i64,
+}

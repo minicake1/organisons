@@ -25,6 +25,7 @@ import SportBadge from '../components/SportBadge'
 import TraceMap from '../components/TraceMap'
 import BatchEditModal from '../components/BatchEditModal'
 import TrashButton from '../components/TrashButton'
+import { sendToKaroo } from '../sendToKaroo'
 import { int, km1, poiKind, slopeColor } from '../labels'
 
 /** Couleur de chaque étape sur la carte et le profil. */
@@ -82,6 +83,10 @@ export default function TourPage({ id, onBack, onOpen }: { id: number; onBack: (
   const [selecting, setSelecting] = useState(false)
   const [picked, setPicked] = useState<number[]>([])
   const [batchOpen, setBatchOpen] = useState(false)
+  const [karoo, setKaroo] = useState(false)
+  useEffect(() => {
+    api.hammerheadStatus().then((s) => setKaroo(s.connected)).catch(() => {})
+  }, [])
 
   const reload = () => {
     api
@@ -201,6 +206,30 @@ export default function TourPage({ id, onBack, onOpen }: { id: number; onBack: (
           <Menu.Dropdown>
             <Menu.Item onClick={exportOne}>Un GPX (une piste par étape)…</Menu.Item>
             <Menu.Item onClick={exportStages}>Étape par étape dans un dossier…</Menu.Item>
+            {karoo && (
+              <>
+                <Menu.Divider />
+                <Menu.Item
+                  onClick={async () => {
+                    setError(null)
+                    setNotice("Envoi vers le Karoo…")
+                    try {
+                      const { text, report } = await sendToKaroo(
+                        stages.map((s) => s.id),
+                        (d, n) => setNotice(`Envoi vers le Karoo : ${d} / ${n} étape(s)…`),
+                      )
+                      setNotice(text)
+                      if (report.errors.length) setError(report.errors.slice(0, 3).join(" / "))
+                    } catch (e) {
+                      setNotice(null)
+                      setError(String(e))
+                    }
+                  }}
+                >
+                  Envoyer les {stages.length} étapes vers le Karoo
+                </Menu.Item>
+              </>
+            )}
           </Menu.Dropdown>
         </Menu>
       </Group>

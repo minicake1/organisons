@@ -611,3 +611,37 @@ mod tests {
         assert_eq!(p, PathBuf::from("/nas/gpx").join("Komoot").join("BRM 2027").join("2026-05 Boucle Vexin.gpx"));
     }
 }
+
+/// Dossier des entraînements dans une bibliothèque gérée.
+pub const WORKOUT_DIR: &str = "Entraînements";
+
+/// Copie des séances `.zwo` dans une bibliothèque, dans le dossier
+/// « Entraînements » (nom de la séance), puis les indexe. Les originaux restent.
+pub fn import_workouts(index: &Index, library: &Library, files: &[String], now: i64) -> Result<OrganizeReport> {
+    let mut report = OrganizeReport::default();
+    let dir = PathBuf::from(&library.path).join(WORKOUT_DIR);
+    for src in files {
+        let src_path = Path::new(src);
+        let w = match crate::workout::read_zwo(src_path) {
+            Ok(w) => w,
+            Err(e) => {
+                report.errors.push(format!("{src} : {e}"));
+                continue;
+            }
+        };
+        if let Err(source) = fs::create_dir_all(&dir) {
+            return Err(crate::Error::Io { path: dir, source });
+        }
+        let to = unique(dir.join(format!("{}.zwo", sanitize(&w.name))), &HashSet::new());
+        if let Err(e) = fs::copy(src_path, &to) {
+            report.errors.push(format!("{} : copie impossible ({e})", w.name));
+            continue;
+        }
+        let key = to.to_string_lossy().to_string();
+        match scan::index_workout(index, library, &to, &key, now) {
+            Ok(()) => report.imported += 1,
+            Err(e) => report.errors.push(e.to_string()),
+        }
+    }
+    Ok(report)
+}

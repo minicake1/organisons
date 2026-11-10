@@ -45,3 +45,7 @@ body { background: #f8f9fa; }
 /* Croix et corbeilles de suppression (tuiles, listes) : discrètes (45 %), pleines au survol. */
 .trash-faded { opacity: 0.45; transition: opacity 0.15s; }
 .trash-faded:hover, .trash-faded:focus-visible { opacity: 1; }
+/* Tuiles (Bibliothèque, Entraînements) : autant de colonnes que la largeur le permet ;
+   largeur minimale de 300 px sur une fenêtre normale, jusqu’à 400 px sur un très grand écran,
+   pour ne pas étirer les tuiles sur un écran large (34" UWQHD…). */
+.tile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(clamp(300px, 12vw, 400px), 1fr)); gap: var(--mantine-spacing-md); }

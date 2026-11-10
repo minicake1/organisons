@@ -79,6 +79,40 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL
 );
 -- Paires de traces que l'utilisateur a déclarées « pas des doublons » (a < b).
+-- Entraînements envoyés vers un compteur (identifiant chez le service).
+CREATE TABLE IF NOT EXISTS workout_sends (
+    workout_id  INTEGER NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
+    service     TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    sent_at     INTEGER NOT NULL,
+    PRIMARY KEY (workout_id, service)
+);
+-- Entraînements (.zwo) trouvés dans les bibliothèques.
+CREATE TABLE IF NOT EXISTS workouts (
+    id          INTEGER PRIMARY KEY,
+    library_id  INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+    path        TEXT NOT NULL UNIQUE,
+    file_size   INTEGER NOT NULL,
+    file_mtime  INTEGER NOT NULL,
+    name        TEXT NOT NULL,
+    author      TEXT NOT NULL,
+    description TEXT NOT NULL,
+    sport       TEXT NOT NULL,
+    tags_json   TEXT NOT NULL,
+    duration    INTEGER NOT NULL,
+    intensity   REAL NOT NULL,
+    tss         REAL NOT NULL,
+    blocks_json TEXT NOT NULL,
+    added_at    INTEGER NOT NULL
+);
+-- Parcours envoyés vers un compteur (Hammerhead…) : identifiant chez le service, pour mettre à jour.
+CREATE TABLE IF NOT EXISTS device_sends (
+    trace_id    INTEGER NOT NULL REFERENCES traces(id) ON DELETE CASCADE,
+    service     TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    sent_at     INTEGER NOT NULL,
+    PRIMARY KEY (trace_id, service)
+);
 -- Parcours déjà importés depuis un service (Komoot…), pour ne pas les reprendre.
 CREATE TABLE IF NOT EXISTS external_imports (
     source      TEXT NOT NULL,
@@ -1274,5 +1308,176 @@ impl Index {
             params![source, external_id, path, now],
         )?;
         Ok(())
+    }
+}
+
+impl Index {
+    /// Identifiant du parcours déjà envoyé vers un service (pour le mettre à jour).
+    pub fn device_send(&self, trace_id: i64, service: &str) -> Result<Option<(String, i64)>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT external_id, sent_at FROM device_sends WHERE trace_id = ?1 AND service = ?2",
+                params![trace_id, service],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?)
+    }
+
+    pub fn set_device_send(&self, trace_id: i64, service: &str, external_id: &str, now: i64) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO device_sends(trace_id, service, external_id, sent_at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(trace_id, service) DO UPDATE SET external_id = excluded.external_id, sent_at = excluded.sent_at",
+            params![trace_id, service, external_id, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn clear_device_send(&self, trace_id: i64, service: &str) -> Result<()> {
+        self.conn.execute("DELETE FROM device_sends WHERE trace_id = ?1 AND service = ?2", params![trace_id, service])?;
+        Ok(())
+    }
+}
+
+impl Index {
+    /// Taille et date connues d'un entraînement (pour ne pas relire un fichier inchangé).
+    pub fn workout_state(&self, path: &str) -> Result<Option<(i64, i64)>> {
+        Ok(self
+            .conn
+            .query_row("SELECT file_size, file_mtime FROM workouts WHERE path = ?1", [path], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()?)
+    }
+
+    pub fn upsert_workout(
+        &self,
+        library_id: i64,
+        path: &str,
+        size: i64,
+        mtime: i64,
+        w: &crate::workout::Workout,
+        now: i64,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO workouts(library_id, path, file_size, file_mtime, name, author, description, sport, tags_json,
+                                  duration, intensity, tss, blocks_json, added_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+             ON CONFLICT(path) DO UPDATE SET library_id = excluded.library_id, file_size = excluded.file_size,
+               file_mtime = excluded.file_mtime, name = excluded.name, author = excluded.author,
+               description = excluded.description, sport = excluded.sport, tags_json = excluded.tags_json,
+               duration = excluded.duration, intensity = excluded.intensity, tss = excluded.tss,
+               blocks_json = excluded.blocks_json",
+            params![
+                library_id,
+                path,
+                size,
+                mtime,
+                w.name,
+                w.author,
+                w.description,
+                w.sport,
+                serde_json::to_string(&w.tags)?,
+                w.duration,
+                w.intensity,
+                w.tss,
+                serde_json::to_string(&w.blocks)?,
+                now
+            ],
+        )?;
+        Ok(self.conn.query_row("SELECT id FROM workouts WHERE path = ?1", [path], |r| r.get(0))?)
+    }
+
+    /// Retire de l'index les entraînements d'une bibliothèque qui n'ont pas été revus.
+    pub fn remove_missing_workouts(&self, library_id: i64, seen: &std::collections::HashSet<String>) -> Result<usize> {
+        let mut st = self.conn.prepare("SELECT id, path FROM workouts WHERE library_id = ?1")?;
+        let rows: Vec<(i64, String)> =
+            st.query_map([library_id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<std::result::Result<_, _>>()?;
+        let mut n = 0;
+        for (id, path) in rows {
+            if !seen.contains(&path) {
+                self.conn.execute("DELETE FROM workouts WHERE id = ?1", [id])?;
+                n += 1;
+            }
+        }
+        Ok(n)
+    }
+
+    /// Tous les entraînements, les plus récemment ajoutés d'abord.
+    pub fn workouts(&self) -> Result<Vec<WorkoutSummary>> {
+        let mut st = self.conn.prepare(
+            "SELECT id, library_id, path, name, author, description, sport, tags_json, duration, intensity, tss,
+                    blocks_json, added_at FROM workouts ORDER BY added_at DESC, name COLLATE NATUREL",
+        )?;
+        let rows = st.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, String>(6)?,
+                r.get::<_, String>(7)?,
+                r.get::<_, u32>(8)?,
+                r.get::<_, f64>(9)?,
+                r.get::<_, f64>(10)?,
+                r.get::<_, String>(11)?,
+                r.get::<_, i64>(12)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, library_id, path, name, author, description, sport, tags, duration, intensity, tss, blocks, added_at) = row?;
+            out.push(WorkoutSummary {
+                id,
+                library_id,
+                path,
+                workout: crate::workout::Workout {
+                    name,
+                    author,
+                    description,
+                    sport,
+                    tags: serde_json::from_str(&tags).unwrap_or_default(),
+                    duration,
+                    intensity,
+                    tss,
+                    blocks: serde_json::from_str(&blocks).unwrap_or_default(),
+                },
+                added_at,
+            });
+        }
+        Ok(out)
+    }
+
+    pub fn workout(&self, id: i64) -> Result<WorkoutSummary> {
+        self.workouts()?.into_iter().find(|w| w.id == id).ok_or_else(|| Error::NotFound(format!("entraînement {id}")))
+    }
+}
+
+impl Index {
+    pub fn workout_send(&self, workout_id: i64, service: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT external_id FROM workout_sends WHERE workout_id = ?1 AND service = ?2",
+                params![workout_id, service],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+
+    pub fn set_workout_send(&self, workout_id: i64, service: &str, external_id: &str, now: i64) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO workout_sends(workout_id, service, external_id, sent_at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(workout_id, service) DO UPDATE SET external_id = excluded.external_id, sent_at = excluded.sent_at",
+            params![workout_id, service, external_id, now],
+        )?;
+        Ok(())
+    }
+
+    /// Entraînements déjà envoyés vers ce service.
+    pub fn workouts_sent(&self, service: &str) -> Result<Vec<i64>> {
+        let mut st = self.conn.prepare("SELECT workout_id FROM workout_sends WHERE service = ?1")?;
+        let ids = st.query_map([service], |r| r.get(0))?.collect::<std::result::Result<_, _>>()?;
+        Ok(ids)
     }
 }

@@ -500,3 +500,52 @@ fn doublons_mis_de_cote_restaures() {
     assert_eq!(idx.count().unwrap(), 2);
     assert!(organize::set_aside_list(&idx).unwrap().is_empty());
 }
+
+#[test]
+fn gpx_pour_le_karoo() {
+    let bytes = device::hammerhead_gpx(&fixture()).unwrap();
+    let g = gpx::read(std::io::Cursor::new(&bytes)).unwrap();
+    assert_eq!(g.waypoints.len(), 182, "points d'intérêt gardés");
+    let allowed = ["Food", "Water", "Parking", "Camping", "Lodging", "Geocache", "Summit", "Generic", "Danger"];
+    assert!(g.waypoints.iter().all(|w| allowed.contains(&w.type_.as_deref().unwrap()) && w.symbol == w.type_));
+    assert!(g.waypoints.iter().any(|w| w.type_.as_deref() == Some("Danger")));
+    assert!(g.waypoints.iter().any(|w| w.type_.as_deref() == Some("Water")));
+    assert_eq!(g.tracks.iter().flat_map(|t| &t.segments).map(|s| s.points.len()).sum::<usize>(), 14322);
+}
+
+#[test]
+fn entrainements_zwo() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("NAS");
+    std::fs::create_dir_all(&root).unwrap();
+    let zwo = r#"<workout_file><name>Seuil 2 × 10</name><tags><tag name="Seuil"/></tags><workout>
+        <Warmup Duration="600" PowerLow="0.5" PowerHigh="0.75"/>
+        <IntervalsT Repeat="2" OnDuration="600" OffDuration="300" OnPower="1" OffPower="0.5"/>
+        <Cooldown Duration="300" PowerLow="0.6" PowerHigh="0.4"/></workout></workout_file>"#;
+    std::fs::write(root.join("seuil.zwo"), zwo).unwrap();
+    std::fs::copy(fixture(), root.join("brm.gpx")).unwrap();
+    let mut idx = Index::open_in_memory().unwrap();
+    let lib = idx.add_library("NAS", &root.to_string_lossy(), "managed", "", false).unwrap();
+    scan_library(&mut idx, &lib, 1_000).unwrap();
+    assert_eq!(idx.count().unwrap(), 1, "le .zwo n'est pas une trace");
+    let ws = idx.workouts().unwrap();
+    assert_eq!(ws.len(), 1);
+    assert_eq!(ws[0].workout.name, "Seuil 2 × 10");
+    assert_eq!(ws[0].workout.duration, 600 + 2 * 900 + 300);
+
+    // Import : copié dans « Entraînements », l'original reste.
+    let outside = dir.path().join("Téléchargements");
+    std::fs::create_dir_all(&outside).unwrap();
+    let src = outside.join("vo2.zwo");
+    std::fs::write(&src, zwo.replace("Seuil 2 × 10", "VO2 max")).unwrap();
+    let r = organize::import_workouts(&idx, &lib, &[src.to_string_lossy().to_string()], 2_000).unwrap();
+    assert_eq!(r.imported, 1, "{:?}", r.errors);
+    assert!(root.join("Entraînements").join("VO2 max.zwo").exists());
+    assert!(src.exists());
+    assert_eq!(idx.workouts().unwrap().len(), 2);
+
+    // Fichier supprimé : il sort de l'index à la relecture.
+    std::fs::remove_file(root.join("seuil.zwo")).unwrap();
+    scan_library(&mut idx, &lib, 3_000).unwrap();
+    assert_eq!(idx.workouts().unwrap().len(), 1);
+}

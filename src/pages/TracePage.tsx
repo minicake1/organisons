@@ -21,12 +21,13 @@ import {
   Title,
   Tooltip,
 } from '@mantine/core'
-import { IconArrowLeft, IconCheck, IconChevronDown, IconDeviceWatch, IconFolderOpen, IconPencil } from '@tabler/icons-react'
+import { IconArrowLeft, IconCheck, IconChevronDown, IconFolderOpen, IconPencil } from '@tabler/icons-react'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
 import { api, type Collection, type Poi, type PoiKind, type TraceDetail } from '../api'
 import SportBadge from '../components/SportBadge'
 import TagSuggestions from '../components/TagSuggestions'
 import TrashButton from '../components/TrashButton'
+import SendToDevice from '../components/SendToDevice'
 import { HILLINESS, POI_KINDS, SURFACE_CLASSES, int, km1, poiKind, slopeColor, surfaceColor, windLabel } from '../labels'
 import { computeSurface } from '../osmSurface'
 import ElevationProfile from '../components/ElevationProfile'
@@ -48,6 +49,7 @@ export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: {
   const [poiOrder, setPoiOrder] = useState<'km' | 'kind'>('kind')
   const [folded, setFolded] = useState<Partial<Record<PoiKind, boolean>>>({})
   const [editing, setEditing] = useState(false)
+  const [deviceNotice, setDeviceNotice] = useState<string | null>(null)
   const [offline, setOffline] = useState<number[]>([])
   // Partie de la trace visible sur la carte : le profil suit le zoom.
   const [range, setRange] = useState<[number, number] | null>(null)
@@ -165,14 +167,15 @@ export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: {
             </Button>
           </Tooltip>
           <TrashButton look="button" trace={t} onTrashed={onBack} />
-          <Tooltip label="Prévu dans une prochaine version (Garmin, Hammerhead, Wahoo, Edge en USB)">
-            <Button variant="default" leftSection={<IconDeviceWatch size={16} />} data-disabled onClick={(e) => e.preventDefault()}>
-              Envoyer vers l'appareil
-            </Button>
-          </Tooltip>
+          <SendToDevice traceId={t.id} onMessage={(text, isError) => (isError ? setSaveError(text) : setDeviceNotice(text))} />
         </Group>
       </Group>
 
+      {deviceNotice && (
+        <Paper withBorder p="xs" bg="teal.0" c="teal.9" onClick={() => setDeviceNotice(null)}>
+          <Text size="sm">{deviceNotice}</Text>
+        </Paper>
+      )}
       <Group align="stretch" gap="md" wrap="nowrap" style={{ flex: 1, minHeight: 0 }}>
         <Stack gap="md" style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
           <Paper withBorder radius="md" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>

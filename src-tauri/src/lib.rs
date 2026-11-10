@@ -5,8 +5,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::{Emitter, Manager, State};
 
+mod hammerhead;
 mod komoot;
 mod openrunner;
+mod training;
 use traces_core::scan::{scan_library, write_trace_meta};
 use traces_core::{
     organize, sport, surface, Collection, DuplicateGroup, DuplicateSet, Index, Library, OrganizeReport, PlannedMove,
@@ -328,6 +330,222 @@ async fn openrunner_import(app: tauri::AppHandle, library_id: i64, links: Vec<St
         }
         let _ = app.emit("openrunner-progress", KomootProgress { phase: "import", done: total, total });
         Ok(report)
+    })
+    .await
+    .map_err(err)?
+}
+
+// ---- Entraînements (.zwo) --------------------------------------------------
+
+#[tauri::command]
+fn list_workouts(state: State<AppState>) -> CmdResult<Vec<traces_core::WorkoutSummary>> {
+    state.index.lock().map_err(err)?.workouts().map_err(err)
+}
+
+/// Copie des séances .zwo dans le dossier « Entraînements » d’une bibliothèque.
+#[tauri::command]
+fn import_workouts(state: State<AppState>, library_id: i64, files: Vec<String>) -> CmdResult<OrganizeReport> {
+    let index = state.index.lock().map_err(err)?;
+    let lib = index.library(library_id).map_err(err)?;
+    organize::import_workouts(&index, &lib, &files, now()).map_err(err)
+}
+
+/// Dossiers de séances Zwift trouvés sur ce PC (un par identifiant Zwift).
+#[tauri::command]
+fn zwift_folders(app: tauri::AppHandle) -> Vec<String> {
+    let documents = app.path().document_dir().unwrap_or_default();
+    training::zwift_folders(&documents)
+}
+
+/// Copie des séances dans le dossier Zwift choisi ; renvoie les erreurs.
+#[tauri::command]
+fn zwift_send(state: State<AppState>, ids: Vec<i64>, folder: String) -> CmdResult<Vec<String>> {
+    let index = state.index.lock().map_err(err)?;
+    let mut errors = Vec::new();
+    for id in ids {
+        let w = index.workout(id).map_err(err)?;
+        if let Err(e) = training::send_to_zwift(&folder, &w.workout.name, std::path::Path::new(&w.path)) {
+            errors.push(e);
+        }
+    }
+    Ok(errors)
+}
+
+#[tauri::command]
+fn icu_status() -> training::IcuStatus {
+    training::icu_status()
+}
+
+#[tauri::command]
+async fn icu_connect(athlete_id: String, api_key: String) -> CmdResult<training::IcuStatus> {
+    tauri::async_runtime::spawn_blocking(move || training::icu_connect(&athlete_id, &api_key)).await.map_err(err)?
+}
+
+#[tauri::command]
+fn icu_disconnect() -> CmdResult<()> {
+    training::icu_disconnect()
+}
+
+/// Pose des séances au calendrier intervals.icu, à la date donnée (AAAA-MM-JJ).
+#[tauri::command]
+async fn icu_plan(app: tauri::AppHandle, ids: Vec<i64>, date: String) -> CmdResult<Vec<String>> {
+    tauri::async_runtime::spawn_blocking(move || -> CmdResult<Vec<String>> {
+        let mut errors = Vec::new();
+        for id in ids {
+            let w = app.state::<AppState>().index.lock().map_err(err)?.workout(id).map_err(err)?;
+            let result = std::fs::read_to_string(&w.path)
+                .map_err(|e| format!("{} : {e}", w.path))
+                .and_then(|zwo| training::icu_plan(&w.workout.name, &zwo, &date, &w.workout.sport));
+            if let Err(e) = result {
+                errors.push(format!("{} : {e}", w.workout.name));
+            }
+        }
+        Ok(errors)
+    })
+    .await
+    .map_err(err)?
+}
+
+/// Entraînements déjà envoyés vers Hammerhead.
+#[tauri::command]
+fn workouts_sent(state: State<AppState>) -> CmdResult<Vec<i64>> {
+    state.index.lock().map_err(err)?.workouts_sent("hammerhead").map_err(err)
+}
+
+/// Envoie des entraînements vers Hammerhead (mis à jour s’ils y sont déjà).
+#[tauri::command]
+async fn hammerhead_send_workouts(app: tauri::AppHandle, ids: Vec<i64>) -> CmdResult<SendReport> {
+    tauri::async_runtime::spawn_blocking(move || -> CmdResult<SendReport> {
+        let mut report = SendReport { sent: 0, updated: 0, errors: vec![] };
+        for id in ids {
+            let (w, existing) = {
+                let state = app.state::<AppState>();
+                let index = state.index.lock().map_err(err)?;
+                (index.workout(id).map_err(err)?, index.workout_send(id, "hammerhead").map_err(err)?)
+            };
+            let result = std::fs::read(&w.path)
+                .map_err(|e| format!("{} : {e}", w.path))
+                .and_then(|bytes| hammerhead::send_workout(&w.workout.name, &bytes, existing.as_deref()));
+            match result {
+                Ok(external) => {
+                    app.state::<AppState>().index.lock().map_err(err)?.set_workout_send(id, "hammerhead", &external, now()).map_err(err)?;
+                    if existing.is_some() {
+                        report.updated += 1
+                    } else {
+                        report.sent += 1
+                    }
+                }
+                Err(e) => report.errors.push(format!("{} : {e}", w.workout.name)),
+            }
+        }
+        Ok(report)
+    })
+    .await
+    .map_err(err)?
+}
+
+// ---- Hammerhead (Karoo) ------------------------------------------------
+
+#[tauri::command]
+fn hammerhead_status() -> hammerhead::Status {
+    hammerhead::status()
+}
+
+/// Application Hammerhead de l’utilisateur (secret vide : garder l’ancien).
+#[tauri::command]
+fn hammerhead_set_client(client_id: String, client_secret: String, redirect_uri: String) -> CmdResult<()> {
+    hammerhead::set_client(&client_id, &client_secret, &redirect_uri)
+}
+
+/// Connexion du compte par le navigateur (attend le retour, 5 minutes au plus).
+#[tauri::command]
+async fn hammerhead_connect(app: tauri::AppHandle) -> CmdResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+    tauri::async_runtime::spawn_blocking(move || {
+        hammerhead::connect(|url| app.opener().open_url(url, None::<&str>).map_err(|e| format!("Navigateur : {e}")))
+    })
+    .await
+    .map_err(err)?
+}
+
+#[tauri::command]
+fn hammerhead_reset_client() -> CmdResult<()> {
+    hammerhead::reset_client()
+}
+
+#[tauri::command]
+fn hammerhead_cancel() {
+    hammerhead::cancel()
+}
+
+#[tauri::command]
+fn hammerhead_disconnect() -> CmdResult<()> {
+    hammerhead::disconnect()
+}
+
+/// Résultat d’un envoi vers le Karoo.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SendReport {
+    sent: usize,
+    updated: usize,
+    errors: Vec<String>,
+}
+
+/// Envoie des traces vers le compte Hammerhead (le Karoo les récupère ensuite) :
+/// une trace déjà envoyée est mise à jour, pas dupliquée. Avancement : « hammerhead-progress ».
+#[tauri::command]
+async fn hammerhead_send(app: tauri::AppHandle, ids: Vec<i64>) -> CmdResult<SendReport> {
+    tauri::async_runtime::spawn_blocking(move || -> CmdResult<SendReport> {
+        let total = ids.len();
+        let mut report = SendReport { sent: 0, updated: 0, errors: vec![] };
+        for (n, id) in ids.iter().enumerate() {
+            let _ = app.emit("hammerhead-progress", KomootProgress { phase: "import", done: n, total });
+            let (name, path, existing) = {
+                let state = app.state::<AppState>();
+                let index = state.index.lock().map_err(err)?;
+                let t = index.get(*id).map_err(err)?;
+                let existing = index.device_send(*id, "hammerhead").map_err(err)?.map(|s| s.0);
+                (t.summary.name, t.summary.path, existing)
+            };
+            let result = traces_core::device::hammerhead_gpx(std::path::Path::new(&path))
+                .map_err(|e| e.to_string())
+                .and_then(|gpx| hammerhead::send_route(&name, &gpx, existing.as_deref()));
+            match result {
+                Ok(external) => {
+                    let state = app.state::<AppState>();
+                    state.index.lock().map_err(err)?.set_device_send(*id, "hammerhead", &external, now()).map_err(err)?;
+                    if existing.is_some() {
+                        report.updated += 1
+                    } else {
+                        report.sent += 1
+                    }
+                }
+                Err(e) => report.errors.push(format!("{name} : {e}")),
+            }
+        }
+        let _ = app.emit("hammerhead-progress", KomootProgress { phase: "import", done: total, total });
+        Ok(report)
+    })
+    .await
+    .map_err(err)?
+}
+
+/// Date d’envoi vers le Karoo (secondes Unix), si la trace y a été envoyée.
+#[tauri::command]
+fn hammerhead_sent_at(state: State<AppState>, id: i64) -> CmdResult<Option<i64>> {
+    Ok(state.index.lock().map_err(err)?.device_send(id, "hammerhead").map_err(err)?.map(|s| s.1))
+}
+
+/// Retire la trace du compte Hammerhead (et donc du Karoo à la prochaine synchro).
+#[tauri::command]
+async fn hammerhead_remove(app: tauri::AppHandle, id: i64) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || -> CmdResult<()> {
+        let existing = app.state::<AppState>().index.lock().map_err(err)?.device_send(id, "hammerhead").map_err(err)?;
+        if let Some((external, _)) = existing {
+            hammerhead::delete_route(&external)?;
+        }
+        app.state::<AppState>().index.lock().map_err(err)?.clear_device_send(id, "hammerhead").map_err(err)
     })
     .await
     .map_err(err)?
@@ -660,6 +878,25 @@ pub fn run() {
             create_tag,
             batch_edit,
             set_collection_tour,
+            list_workouts,
+            import_workouts,
+            workouts_sent,
+            zwift_folders,
+            zwift_send,
+            icu_status,
+            icu_connect,
+            icu_disconnect,
+            icu_plan,
+            hammerhead_send_workouts,
+            hammerhead_status,
+            hammerhead_set_client,
+            hammerhead_connect,
+            hammerhead_disconnect,
+            hammerhead_cancel,
+            hammerhead_reset_client,
+            hammerhead_send,
+            hammerhead_sent_at,
+            hammerhead_remove,
             komoot_status,
             komoot_login,
             komoot_logout,

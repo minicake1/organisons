@@ -5,6 +5,7 @@
 
 pub mod analyze;
 pub mod autotags;
+pub mod device;
 pub mod error;
 pub mod geo;
 pub mod gpxmeta;
@@ -15,6 +16,7 @@ pub mod organize;
 pub mod scan;
 pub mod sport;
 pub mod tour;
+pub mod workout;
 pub mod surface;
 
 pub use analyze::{analyze_file, analyze_gpx};

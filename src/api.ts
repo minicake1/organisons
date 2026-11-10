@@ -193,6 +193,26 @@ export const api = {
   createTag: (name: string) => invoke<void>('create_tag', { name }),
   batchEdit: (ids: number[], edit: BatchEdit) => invoke<string[]>('batch_edit', { ids, edit }),
   setCollectionTour: (id: number, isTour: boolean) => invoke<void>('set_collection_tour', { id, isTour }),
+  listWorkouts: () => invoke<WorkoutSummary[]>('list_workouts'),
+  zwiftFolders: () => invoke<string[]>('zwift_folders'),
+  zwiftSend: (ids: number[], folder: string) => invoke<string[]>('zwift_send', { ids, folder }),
+  icuStatus: () => invoke<IcuStatus>('icu_status'),
+  icuConnect: (athleteId: string, apiKey: string) => invoke<IcuStatus>('icu_connect', { athleteId, apiKey }),
+  icuDisconnect: () => invoke<void>('icu_disconnect'),
+  icuPlan: (ids: number[], date: string) => invoke<string[]>('icu_plan', { ids, date }),
+  importWorkouts: (libraryId: number, files: string[]) => invoke<OrganizeReport>('import_workouts', { libraryId, files }),
+  workoutsSent: () => invoke<number[]>('workouts_sent'),
+  hammerheadSendWorkouts: (ids: number[]) => invoke<SendReport>('hammerhead_send_workouts', { ids }),
+  hammerheadStatus: () => invoke<HammerheadStatus>('hammerhead_status'),
+  hammerheadSetClient: (clientId: string, clientSecret: string, redirectUri: string) =>
+    invoke<void>('hammerhead_set_client', { clientId, clientSecret, redirectUri }),
+  hammerheadConnect: () => invoke<void>('hammerhead_connect'),
+  hammerheadDisconnect: () => invoke<void>('hammerhead_disconnect'),
+  hammerheadCancel: () => invoke<void>('hammerhead_cancel'),
+  hammerheadResetClient: () => invoke<void>('hammerhead_reset_client'),
+  hammerheadSend: (ids: number[]) => invoke<SendReport>('hammerhead_send', { ids }),
+  hammerheadSentAt: (id: number) => invoke<number | null>('hammerhead_sent_at', { id }),
+  hammerheadRemove: (id: number) => invoke<void>('hammerhead_remove', { id }),
   komootStatus: () => invoke<KomootAccount | null>('komoot_status'),
   komootLogin: (email: string, password: string) => invoke<KomootAccount>('komoot_login', { email, password }),
   komootLogout: () => invoke<void>('komoot_logout'),
@@ -273,4 +293,58 @@ export interface KomootTour {
   elevationUp: number
   date: string | null
   imported: boolean
+}
+
+/** Application et compte Hammerhead (le secret et le jeton restent côté Rust). */
+export interface HammerheadStatus {
+  configured: boolean
+  clientId: string
+  redirectUri: string
+  connected: boolean
+  /** Application d’Organisons intégrée à l’appli (rien à saisir). */
+  builtin: boolean
+  builtinAvailable: boolean
+}
+
+/** Résultat d'un envoi vers le Karoo. */
+export interface SendReport {
+  sent: number
+  updated: number
+  errors: string[]
+}
+
+/** Bloc d'une séance (.zwo), puissances en fraction de FTP. */
+export interface WorkoutBlock {
+  kind: 'warmup' | 'cooldown' | 'steady' | 'on' | 'off' | 'ramp' | 'free' | 'max'
+  start: number
+  duration: number
+  from: number
+  to: number
+  cadence: number | null
+}
+
+/** Entraînement (.zwo) de la bibliothèque. */
+export interface WorkoutSummary {
+  id: number
+  libraryId: number
+  path: string
+  name: string
+  author: string
+  description: string
+  sport: string
+  tags: string[]
+  /** secondes */
+  duration: number
+  /** facteur d'intensité */
+  intensity: number
+  tss: number
+  blocks: WorkoutBlock[]
+  addedAt: number
+}
+
+/** Compte intervals.icu (la clé d'API reste côté Rust). */
+export interface IcuStatus {
+  connected: boolean
+  athleteId: string
+  name: string
 }

@@ -4,6 +4,7 @@ import {
 
 
   IconBuildingBroadcastTower,
+  IconBarbell,
   IconCalendar,
   IconCopy,
   IconDeviceWatch,
@@ -27,6 +28,7 @@ import TrashPage from './pages/TrashPage'
 import TourPage from './pages/TourPage'
 import KomootPage from './pages/KomootPage'
 import OpenrunnerPage from './pages/OpenrunnerPage'
+import WorkoutsPage from './pages/WorkoutsPage'
 
 export type Route =
   | { page: 'library'; filter?: TraceFilter }
@@ -40,6 +42,7 @@ export type Route =
   | { page: 'tour'; id: number }
   | { page: 'komoot' }
   | { page: 'openrunner' }
+  | { page: 'workouts' }
 
 /** Fonctions prévues mais pas encore disponibles. */
 function Soon() {
@@ -132,6 +135,12 @@ export default function App() {
         <Stack gap={2} style={{ flex: 1 }}>
           <NavLink label="Bibliothèque" leftSection={<IconStack2 size={18} />} active={onLibrary} onClick={() => go({ page: 'library' })} />
           <NavLink
+            label="Entraînements"
+            leftSection={<IconBarbell size={18} />}
+            active={route.page === 'workouts'}
+            onClick={() => go({ page: 'workouts' })}
+          />
+          <NavLink
             label="Collections"
             leftSection={<IconFolder size={18} />}
             active={from === 'collections' || from === 'collection' || from === 'tour'}
@@ -202,6 +211,7 @@ export default function App() {
         {route.page === 'settings' && <SettingsPage />}
         {route.page === 'komoot' && <KomootPage onLibrary={() => go({ page: 'library' })} />}
         {route.page === 'openrunner' && <OpenrunnerPage onLibrary={() => go({ page: 'library' })} />}
+        {route.page === 'workouts' && <WorkoutsPage />}
         {route.page === 'trash' && (
           // Trace restaurée : elle est de retour dans la Bibliothèque, on l’ouvre depuis là.
           <TrashPage onOpen={(id) => go({ page: 'trace', id, back: { page: 'library' } })} onChanged={countTrash} />

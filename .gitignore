@@ -4,3 +4,6 @@ target/
 src-tauri/gen/
 *.log
 .DS_Store
+
+# Identifiants de l’application Hammerhead d’Organisons (jamais versionnés)
+src-tauri/hammerhead.local.env

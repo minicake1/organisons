@@ -5,6 +5,8 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { api, type Library, type ScanReport } from '../api'
 import ManagedActions, { type ActionResult } from '../components/ManagedActions'
 import PatternEditor from '../components/PatternEditor'
+import HammerheadPanel from '../components/HammerheadPanel'
+import TrainingPlatformsPanel from '../components/TrainingPlatformsPanel'
 
 export default function SettingsPage() {
   const [libraries, setLibraries] = useState<Library[]>([])
@@ -153,6 +155,11 @@ export default function SettingsPage() {
         </Stack>
       </Paper>
 
+
+      <Title order={2} mt="md">Appareils</Title>
+      <HammerheadPanel />
+      <Title order={2} mt="md">Plateformes d’entraînement</Title>
+      <TrainingPlatformsPanel />
     </Stack>
   )
 }
