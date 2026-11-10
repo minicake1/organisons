@@ -83,6 +83,7 @@ Maquettes (canevas claude.ai, version « v0.1 ») : https://claude.ai/artifact/U
 
 - Lancement sous Windows 11 validé le 09/11/2026 (`npm run tauri dev`).
 - Build validé le 09/11/2026 (`npm run tauri build`, environ 5 min) : `target/release/organisons.exe` et les installateurs `bundle/nsis/*-setup.exe` (3,3 Mo) et `bundle/msi/*.msi` (4,6 Mo), en français (`bundle.windows` de `tauri.conf.json`). Les deux installent pour tout l’ordinateur, dans Program Files (`installMode: perMachine`). Fermer `target/release/organisons.exe` avant un build, sinon erreur « fichier utilisé ».
+- MapLibre 6 : le worker (`maplibre-gl-worker.mjs`) doit être importé avec `?url` et passé à `maplibregl.setWorkerUrl` (fait dans `useMapLibre.ts`), sinon l’appli installée n’a pas de fond de carte (en dev, tout marche quand même).
 - L’installateur n’embarque aucune donnée : l’index est dans `%APPDATA%/fr.organisons.app/index.sqlite`.
 - Dépôt GitHub privé : https://github.com/minicake1/organisons (`gh` installé dans `C:\Program Files\GitHub CLI\`).
 

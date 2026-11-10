@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import * as maplibregl from 'maplibre-gl'
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url'
+
+// MapLibre 6 charge son « worker » depuis un fichier à part. Dans l’appli
+// installée, il doit être copié par Vite (`?url`) et indiqué explicitement :
+// sinon la carte reste sans fond. Ce module est importé par toutes les cartes.
+maplibregl.setWorkerUrl(workerUrl)
 
 /** Fond de carte vectoriel gratuit, sans clé (OpenFreeMap, données OpenStreetMap). */
 export const MAP_STYLE = 'https://tiles.openfreemap.org/styles/liberty'
