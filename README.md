@@ -143,10 +143,16 @@ Organisons est un projet indépendant, écrit de zéro. Il ne reprend pas le cod
 - [Pédalons](https://github.com/glandais/pedalons) (Gabriel Landais, PolyForm Noncommercial 1.0.0) : seuils de relief, filtres de la bibliothèque, et l'idée de lire le revêtement dans les tuiles vectorielles OpenStreetMap au schéma Shortbread.
 - [biketeam](https://github.com/tomacla/biketeam) (tomacla) : méthode du vent idéal, reprise de gpx2web.
 
-Si du code de Pédalons est un jour repris, il faudra le signaler ici et conserver sa mention de copyright.
+Si du code de Pédalons est un jour repris, il faudra le signaler ici et conserver sa mention de copyright. Pédalons est sous PolyForm Noncommercial, qui n'est pas compatible avec l'AGPL : il faudrait l'accord de son auteur.
 
 Données cartographiques : © contributeurs OpenStreetMap ; fonds de carte OpenFreeMap ; tuiles du revêtement VersaTiles.
 
 ## Licence
 
-[PolyForm Noncommercial 1.0.0](LICENSE.md), la même licence que Pédalons : utilisation, modification et redistribution autorisées, sauf à des fins commerciales.
+[GNU AGPL v3 ou toute version ultérieure](LICENSE) (`AGPL-3.0-or-later`), © minicake1.
+
+- Utilisation, modification et redistribution autorisées, y compris à des fins commerciales.
+- Toute version redistribuée, modifiée ou non, doit rester sous la même licence et donner accès à son code source.
+- Une version modifiée proposée à d'autres par le réseau (site web, serveur) doit aussi donner accès à son code source.
+
+Jusqu'à la v0.5.1, Organisons était sous PolyForm Noncommercial 1.0.0.

@@ -1,7 +1,7 @@
 {
   "name": "organisons",
   "private": true,
-  "license": "PolyForm-Noncommercial-1.0.0",
+  "license": "AGPL-3.0-or-later",
   "version": "0.5.1",
   "type": "module",
   "scripts": {

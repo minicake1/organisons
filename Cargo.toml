@@ -5,7 +5,7 @@ members = ["crates/traces-core", "src-tauri"]
 [workspace.package]
 version = "0.5.1"
 edition = "2021"
-license = "PolyForm-Noncommercial-1.0.0"
+license = "AGPL-3.0-or-later"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
