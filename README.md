@@ -176,6 +176,8 @@ npm run build                      # vérification des types et build de l'inter
 cargo run -p traces-core --example indexer -- "D:\GPX"   # indexer un dossier sans interface
 ```
 
+Ces vérifications tournent aussi automatiquement sur GitHub (GitHub Actions, `.github/workflows/ci.yml`) à chaque push sur `main` et sur chaque pull request : tests du cœur et build de l’interface sous Linux, compilation et tests de l’application sous Windows, sans application Hammerhead intégrée.
+
 ## Feuille de route
 
 - **Autres appareils GPS** : à l’étude.
