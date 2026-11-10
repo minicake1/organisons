@@ -8,7 +8,7 @@ use crate::error::{Error, Result};
 use crate::model::*;
 
 /// Version des règles d’analyse : la changer fait relire tous les fichiers une fois.
-const ANALYSIS_VERSION: &str = "4";
+const ANALYSIS_VERSION: &str = "6";
 
 const SCHEMA: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -79,6 +79,10 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL
 );
 -- Paires de traces que l'utilisateur a déclarées « pas des doublons » (a < b).
+-- Tags créés depuis l’onglet Tags, pas encore posés sur une trace.
+CREATE TABLE IF NOT EXISTS tag_names (
+    tag TEXT PRIMARY KEY
+);
 -- Revêtement calculé depuis OpenStreetMap ; `geom_key` invalide le calcul si la trace change.
 CREATE TABLE IF NOT EXISTS trace_surface (
     trace_id    INTEGER PRIMARY KEY REFERENCES traces(id) ON DELETE CASCADE,
@@ -143,6 +147,8 @@ impl Index {
     }
 
     fn init(conn: Connection) -> Result<Self> {
+        // Tri « naturel » des noms : np#2 avant np#10, sans tenir compte de la casse.
+        conn.create_collation("NATUREL", natural_cmp)?;
         conn.execute_batch(SCHEMA)?;
         let index = Self { conn };
         index.migrate()?;
@@ -156,6 +162,11 @@ impl Index {
             ("traces", "sport", "TEXT NOT NULL DEFAULT 'Vélo'"),
             ("traces", "sport_user", "TEXT"),
             ("traces", "gpx_date", "INTEGER"),
+            ("traces", "tag_suggestions", "TEXT NOT NULL DEFAULT '[]'"),
+            ("traces", "tags_ignored", "TEXT NOT NULL DEFAULT '[]'"),
+            ("traces", "hint_text", "TEXT NOT NULL DEFAULT ''"),
+            ("tag_names", "auto", "INTEGER NOT NULL DEFAULT 0"),
+            ("tag_names", "keywords", "TEXT NOT NULL DEFAULT '[]'"),
         ] {
             let exists: bool = self.conn.query_row(
                 &format!("SELECT COUNT(*) > 0 FROM pragma_table_info('{table}') WHERE name = ?1"),
@@ -166,8 +177,15 @@ impl Index {
                 self.conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"))?;
             }
         }
-        // Règles d’analyse changées (2 : `mtb_easy` de Komoot = Gravel ; 3 : sport lu dans le titre ; 4 : nom nettoyé et date du titre) : les fichiers
+        // Règles d’analyse changées (2 : `mtb_easy` de Komoot = Gravel ; 3 : sport lu dans le titre ; 4 : nom nettoyé et date du titre ; 5 : tags proposés ; 6 : texte gardé pour les tags de l’utilisateur) : les fichiers
         // seront relus à la prochaine relecture des dossiers (tags, notes et collections gardés).
+        // Tags déjà en détection auto avant que leur nom soit mis dans les mots-clés : on l’y ajoute, une fois.
+        if self.setting("tag_name_in_keywords")?.is_none() {
+            for tag in self.auto_tags()? {
+                self.add_name_to_keywords(&tag)?;
+            }
+            self.set_setting("tag_name_in_keywords", "1")?;
+        }
         if self.setting("analysis_version")?.as_deref() != Some(ANALYSIS_VERSION) {
             // Empreinte factice et unique : relecture complète sans créer de faux doublons.
             self.conn.execute("UPDATE traces SET file_mtime = 0, file_hash = 'relire-' || id", [])?;
@@ -200,6 +218,12 @@ impl Index {
             .query_row("SELECT id, name, path, mode, pattern, write_gpx FROM libraries WHERE id = ?1", [id], row_to_library)
             .optional()?
             .ok_or_else(|| Error::NotFound(format!("bibliothèque {id}")))
+    }
+
+    /// Modèle de rangement d’une bibliothèque (déjà vérifié par `organize::validate_pattern`).
+    pub fn set_library_pattern(&self, id: i64, pattern: &str) -> Result<()> {
+        self.conn.execute("UPDATE libraries SET pattern = ?2 WHERE id = ?1", params![id, pattern])?;
+        Ok(())
     }
 
     pub fn set_library_write_gpx(&self, id: i64, write_gpx: bool) -> Result<()> {
@@ -313,9 +337,21 @@ impl Index {
     // ---- Tags ----------------------------------------------------------
 
     pub fn tag_counts(&self) -> Result<Vec<TagCount>> {
-        let mut st = self.conn.prepare("SELECT tag, COUNT(*) FROM tags GROUP BY tag ORDER BY tag COLLATE NOCASE")?;
-        let rows = st.query_map([], |r| Ok(TagCount { tag: r.get(0)?, count: r.get(1)? }))?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+        // Tags posés sur des traces, plus ceux créés à l’avance (0 trace).
+        let mut st = self.conn.prepare(
+            "SELECT tag, SUM(n), MAX(auto) FROM (SELECT tag, COUNT(*) AS n, 0 AS auto FROM tags GROUP BY tag
+                                      UNION ALL SELECT tag, 0, auto FROM tag_names)
+             GROUP BY tag ORDER BY tag COLLATE NOCASE",
+        )?;
+        let rows = st.query_map([], |r| Ok(TagCount { tag: r.get(0)?, count: r.get(1)?, auto: r.get(2)?, keywords: vec![] }))?;
+        let mut counts: Vec<TagCount> = rows.collect::<std::result::Result<_, _>>()?;
+        let rules: std::collections::HashMap<String, Vec<String>> = self.auto_tag_rules_all()?.into_iter().collect();
+        for c in &mut counts {
+            if let Some(k) = rules.get(&c.tag) {
+                c.keywords = k.clone();
+            }
+        }
+        Ok(counts)
     }
 
     /// Renomme un tag partout ; vers un tag existant, les deux fusionnent.
@@ -330,6 +366,21 @@ impl Index {
         tx.execute("INSERT OR IGNORE INTO tags(trace_id, tag) SELECT trace_id, ?2 FROM tags WHERE tag = ?1", params![old, new])?;
         if old != new {
             tx.execute("DELETE FROM tags WHERE tag = ?1", [old])?;
+            // Le tag garde son option de détection sous son nouveau nom.
+            let auto: Option<bool> =
+                tx.query_row("SELECT auto FROM tag_names WHERE tag = ?1", [old], |r| r.get(0)).optional()?;
+            let keywords: String = tx
+                .query_row("SELECT keywords FROM tag_names WHERE tag = ?1", [old], |r| r.get(0))
+                .optional()?
+                .unwrap_or_else(|| "[]".into());
+            if let Some(auto) = auto {
+                tx.execute("DELETE FROM tag_names WHERE tag = ?1", [old])?;
+                tx.execute(
+                    "INSERT INTO tag_names(tag, auto, keywords) VALUES (?1, ?2, ?3)
+                     ON CONFLICT(tag) DO UPDATE SET auto = MAX(auto, excluded.auto), keywords = excluded.keywords",
+                    params![new, auto, keywords],
+                )?;
+            }
         }
         tx.commit()?;
         Ok(ids)
@@ -339,6 +390,7 @@ impl Index {
     pub fn delete_tag(&self, tag: &str) -> Result<Vec<i64>> {
         let ids = self.trace_ids_with_tag(tag)?;
         self.conn.execute("DELETE FROM tags WHERE tag = ?1", [tag])?;
+        self.conn.execute("DELETE FROM tag_names WHERE tag = ?1", [tag])?;
         Ok(ids)
     }
 
@@ -385,11 +437,6 @@ impl Index {
             }
             r
         }
-        let ends = |t: &TraceSummary| (t.preview.first().copied(), t.preview.last().copied());
-        let near = |a: Option<[f64; 2]>, b: Option<[f64; 2]>| match (a, b) {
-            (Some(a), Some(b)) => crate::geo::haversine_km(a[0], a[1], b[0], b[1]) < 0.3,
-            _ => false,
-        };
         for i in 0..n {
             for j in (i + 1)..n {
                 let (a, b) = (&all[i], &all[j]);
@@ -398,10 +445,7 @@ impl Index {
                     continue;
                 }
                 let same_file = hash_of.get(&a.id) == hash_of.get(&b.id);
-                let same_route = (a.distance_km - b.distance_km).abs() <= 0.01 * a.distance_km.max(b.distance_km).max(1.0)
-                    && (a.elevation_gain - b.elevation_gain).abs() <= (0.05 * a.elevation_gain.max(b.elevation_gain)).max(30.0)
-                    && near(ends(a).0, ends(b).0)
-                    && near(ends(a).1, ends(b).1);
+                let same_route = similar_routes(&RouteKey::of(a), &RouteKey::of(b));
                 if same_file || same_route {
                     let (ri, rj) = (find(&mut parent, i), find(&mut parent, j));
                     parent[ri] = rj;
@@ -552,6 +596,10 @@ impl Index {
             )?;
             tx.last_insert_rowid()
         };
+        tx.execute(
+            "UPDATE traces SET tag_suggestions = ?2, hint_text = ?3 WHERE id = ?1",
+            params![id, serde_json::to_string(&a.tag_hints)?, a.hint_text],
+        )?;
         {
             let mut st = tx.prepare(
                 "INSERT INTO pois(trace_id, idx, name, kind, km, lat, lon, symbol) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
@@ -600,7 +648,7 @@ impl Index {
     }
 
     pub fn all_tags(&self) -> Result<Vec<String>> {
-        let mut st = self.conn.prepare("SELECT DISTINCT tag FROM tags ORDER BY tag COLLATE NOCASE")?;
+        let mut st = self.conn.prepare("SELECT tag FROM tags UNION SELECT tag FROM tag_names ORDER BY tag COLLATE NOCASE")?;
         let rows = st.query_map([], |r| r.get(0))?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
@@ -670,7 +718,8 @@ impl Index {
             SortKey::Distance => format!(" ORDER BY t.distance_km {dir}"),
             SortKey::Elevation => format!(" ORDER BY t.elevation_gain {dir}"),
             SortKey::Hilliness => format!(" ORDER BY t.elevation_gain / MAX(t.distance_km, 0.001) {dir}"),
-            SortKey::Name => format!(" ORDER BY t.name COLLATE NOCASE {dir}"),
+            SortKey::Name => format!(" ORDER BY t.name COLLATE NATUREL {dir}"),
+            SortKey::Sport => format!(" ORDER BY COALESCE(t.sport_user, t.sport) COLLATE NOCASE {dir}, t.name COLLATE NATUREL"),
         });
 
         let mut st = self.conn.prepare(&sql)?;
@@ -737,6 +786,28 @@ impl Index {
             .filter(|(key, _)| *key == geom_key(&profile))
             .map(|(_, json)| serde_json::from_str(&json))
             .transpose()?;
+        // Tags proposés : ni déjà posés, ni écartés par l’utilisateur.
+        let (hints, ignored, text): (String, String, String) = self.conn.query_row(
+            "SELECT tag_suggestions, tags_ignored, hint_text FROM traces WHERE id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?;
+        let ignored: Vec<String> = serde_json::from_str(&ignored).unwrap_or_default();
+        let mut proposed: Vec<String> = serde_json::from_str(&hints).unwrap_or_default();
+        // Tags de l’utilisateur à détecter (ex. « NP# »), cherchés dans le titre brut et les
+        // métadonnées ; à défaut (trace pas encore relue), dans le nom affiché.
+        let text = if text.is_empty() { summary.name.clone() } else { text };
+        for (tag, words) in self.auto_tag_rules()? {
+            let found = words.iter().any(|w| crate::autotags::text_has_tag(&text, w));
+            if found && !proposed.iter().any(|p| p.to_lowercase() == tag.to_lowercase()) {
+                proposed.push(tag);
+            }
+        }
+        let same = |a: &str, b: &str| a.to_lowercase() == b.to_lowercase();
+        let tag_suggestions = proposed
+            .into_iter()
+            .filter(|h| !summary.tags.iter().chain(&ignored).any(|t| same(t, h)))
+            .collect();
         Ok(TraceDetail {
             collection_ids,
             summary,
@@ -748,6 +819,7 @@ impl Index {
             creator,
             profile,
             surface,
+            tag_suggestions,
             pois,
         })
     }
@@ -852,4 +924,266 @@ fn preview(profile: &[ProfilePoint], n: usize) -> Vec<[f64; 2]> {
             [p.lat, p.lon]
         })
         .collect()
+}
+
+impl Index {
+    /// Écarte des tags proposés : ils ne seront plus suggérés pour cette trace.
+    pub fn ignore_tag_suggestions(&self, id: i64, tags: &[String]) -> Result<()> {
+        let json: String = self.conn.query_row("SELECT tags_ignored FROM traces WHERE id = ?1", [id], |r| r.get(0))?;
+        let mut ignored: Vec<String> = serde_json::from_str(&json).unwrap_or_default();
+        for t in tags {
+            if !ignored.iter().any(|i| i.eq_ignore_ascii_case(t)) {
+                ignored.push(t.clone());
+            }
+        }
+        self.conn.execute(
+            "UPDATE traces SET tags_ignored = ?2 WHERE id = ?1",
+            params![id, serde_json::to_string(&ignored)?],
+        )?;
+        Ok(())
+    }
+}
+
+/// Ce qui sert à reconnaître un même parcours (doublon probable).
+pub(crate) struct RouteKey {
+    pub distance_km: f64,
+    pub elevation_gain: f64,
+    pub start: Option<[f64; 2]>,
+    pub end: Option<[f64; 2]>,
+}
+
+impl RouteKey {
+    pub(crate) fn of(t: &TraceSummary) -> Self {
+        Self {
+            distance_km: t.distance_km,
+            elevation_gain: t.elevation_gain,
+            start: t.preview.first().copied(),
+            end: t.preview.last().copied(),
+        }
+    }
+}
+
+/// Même parcours probable : distance ±1 %, D+ ±5 % (ou 30 m), départ et arrivée à moins de 300 m.
+pub(crate) fn similar_routes(a: &RouteKey, b: &RouteKey) -> bool {
+    let near = |x: Option<[f64; 2]>, y: Option<[f64; 2]>| match (x, y) {
+        (Some(x), Some(y)) => crate::geo::haversine_km(x[0], x[1], y[0], y[1]) < 0.3,
+        _ => false,
+    };
+    (a.distance_km - b.distance_km).abs() <= 0.01 * a.distance_km.max(b.distance_km).max(1.0)
+        && (a.elevation_gain - b.elevation_gain).abs() <= (0.05 * a.elevation_gain.max(b.elevation_gain)).max(30.0)
+        && near(a.start, b.start)
+        && near(a.end, b.end)
+}
+
+impl Index {
+    /// Noms des traces dont le fichier a cette empreinte.
+    pub fn names_by_hash(&self, hash: &str) -> Result<Vec<String>> {
+        let mut st = self.conn.prepare("SELECT name FROM traces WHERE file_hash = ?1 ORDER BY name")?;
+        let names = st.query_map([hash], |r| r.get(0))?.collect::<std::result::Result<Vec<String>, _>>()?;
+        Ok(names)
+    }
+}
+
+impl Index {
+    /// Crée un tag sans l'attacher à une trace (onglet Tags) : il est ensuite
+    /// proposé dans les listes de tags.
+    pub fn create_tag(&self, name: &str) -> Result<()> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(Error::Invalid("Le nom du tag est vide.".into()));
+        }
+        // Comparaison en Rust : NOCASE de SQLite ne connaît que l’ASCII (« Été » ≠ « été »).
+        let lower = name.to_lowercase();
+        let exists = self.all_tags()?.iter().any(|t| t.to_lowercase() == lower);
+        if exists {
+            return Err(Error::Invalid(format!("Le tag « {name} » existe déjà.")));
+        }
+        self.conn.execute("INSERT INTO tag_names(tag) VALUES (?1)", [name])?;
+        Ok(())
+    }
+}
+
+impl Index {
+    /// Active ou non la détection automatique d'un tag dans les titres et métadonnées.
+    pub fn set_tag_auto(&self, tag: &str, auto: bool) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO tag_names(tag, auto) VALUES (?1, ?2) ON CONFLICT(tag) DO UPDATE SET auto = excluded.auto",
+            params![tag, auto],
+        )?;
+        // À l’activation, le nom du tag rejoint ses mots-clés (visible et modifiable).
+        if auto {
+            self.add_name_to_keywords(tag)?;
+        }
+        Ok(())
+    }
+
+    fn add_name_to_keywords(&self, tag: &str) -> Result<()> {
+        let json: String = self.conn.query_row("SELECT keywords FROM tag_names WHERE tag = ?1", [tag], |r| r.get(0))?;
+        let mut k: Vec<String> = serde_json::from_str(&json).unwrap_or_default();
+        if !k.iter().any(|w| w.to_lowercase() == tag.to_lowercase()) {
+            k.insert(0, tag.to_string());
+            self.conn.execute(
+                "UPDATE tag_names SET keywords = ?2 WHERE tag = ?1",
+                params![tag, serde_json::to_string(&k)?],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Tags que l'utilisateur veut voir détectés automatiquement.
+    pub fn auto_tags(&self) -> Result<Vec<String>> {
+        let mut st = self.conn.prepare("SELECT tag FROM tag_names WHERE auto = 1 ORDER BY tag")?;
+        let tags = st.query_map([], |r| r.get(0))?.collect::<std::result::Result<Vec<String>, _>>()?;
+        Ok(tags)
+    }
+}
+
+impl Index {
+    /// Mots-clés de détection d'un tag (en plus de son nom). Ajouter des mots-clés
+    /// active la détection du tag.
+    pub fn set_tag_keywords(&self, tag: &str, keywords: &[String]) -> Result<()> {
+        let mut clean: Vec<String> = Vec::new();
+        for k in keywords.iter().map(|k| k.trim()).filter(|k| !k.is_empty()) {
+            if !clean.iter().any(|c| c.to_lowercase() == k.to_lowercase()) {
+                clean.push(k.to_string());
+            }
+        }
+        let was_auto = self.auto_tags()?.iter().any(|t| t == tag);
+        let json = serde_json::to_string(&clean)?;
+        self.conn.execute(
+            "INSERT INTO tag_names(tag, auto, keywords) VALUES (?1, ?2, ?3)
+             ON CONFLICT(tag) DO UPDATE SET keywords = excluded.keywords, auto = MAX(auto, excluded.auto)",
+            params![tag, !clean.is_empty(), json],
+        )?;
+        // Ajouter des mots-clés active la détection : comme avec l’interrupteur, le nom
+        // du tag rejoint alors ses mots-clés.
+        if !was_auto && !clean.is_empty() {
+            self.add_name_to_keywords(tag)?;
+        }
+        Ok(())
+    }
+
+    /// Mots-clés de tous les tags connus de `tag_names` (détection active ou non).
+    fn auto_tag_rules_all(&self) -> Result<Vec<(String, Vec<String>)>> {
+        let mut st = self.conn.prepare("SELECT tag, keywords FROM tag_names")?;
+        let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (tag, json) = row?;
+            out.push((tag, serde_json::from_str(&json).unwrap_or_default()));
+        }
+        Ok(out)
+    }
+
+    /// Tags à détecter avec leurs mots : le nom du tag, puis ses mots-clés.
+    pub fn auto_tag_rules(&self) -> Result<Vec<(String, Vec<String>)>> {
+        let auto = self.auto_tags()?;
+        Ok(self
+            .auto_tag_rules_all()?
+            .into_iter()
+            .filter(|(t, _)| auto.contains(t))
+            // Les mots-clés font foi (le nom du tag y est mis à l’activation, et peut en être
+            // retiré) ; sans mot-clé, le nom du tag.
+            .map(|(t, k)| {
+                let words = if k.is_empty() { vec![t.clone()] } else { k };
+                (t, words)
+            })
+            .collect())
+    }
+}
+
+/// Comparaison « naturelle » : les nombres sont comparés par leur valeur
+/// (« np#2 » avant « np#10 », « BRM 300 » avant « BRM 1000 »), le texte sans
+/// tenir compte de la casse.
+pub(crate) fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    fn chunks(s: &str) -> Vec<(bool, String)> {
+        let mut out: Vec<(bool, String)> = Vec::new();
+        for c in s.chars() {
+            let digit = c.is_ascii_digit();
+            match out.last_mut() {
+                Some((d, buf)) if *d == digit => buf.push(c),
+                _ => out.push((digit, c.to_string())),
+            }
+        }
+        out
+    }
+    let (ca, cb) = (chunks(a), chunks(b));
+    for (x, y) in ca.iter().zip(cb.iter()) {
+        let ord = match (x, y) {
+            ((true, n1), (true, n2)) => {
+                let (t1, t2) = (n1.trim_start_matches('0'), n2.trim_start_matches('0'));
+                t1.len().cmp(&t2.len()).then_with(|| t1.cmp(t2)).then_with(|| n1.len().cmp(&n2.len()))
+            }
+            ((_, s1), (_, s2)) => s1.to_lowercase().cmp(&s2.to_lowercase()),
+        };
+        if ord != Ordering::Equal {
+            return ord;
+        }
+    }
+    ca.len().cmp(&cb.len()).then_with(|| a.cmp(b))
+}
+
+#[cfg(test)]
+mod tri_naturel {
+    use super::natural_cmp;
+
+    #[test]
+    fn nombres_dans_l_ordre() {
+        let mut v = vec!["np#10 Gravel", "np#2 Route", "NP#1 boucle", "BRM 1000", "BRM 300", "brm 600", "Sortie"];
+        v.sort_by(|a, b| natural_cmp(a, b));
+        assert_eq!(v, vec!["BRM 300", "brm 600", "BRM 1000", "NP#1 boucle", "np#2 Route", "np#10 Gravel", "Sortie"]);
+        // Et dans SQLite, via la collation de l’index.
+        let idx = super::Index::open_in_memory().unwrap();
+        let before: bool = idx.conn.query_row("SELECT 'np#2' < 'np#10' COLLATE NATUREL", [], |r| r.get(0)).unwrap();
+        assert!(before);
+    }
+}
+
+impl Index {
+    /// Applique une modification à plusieurs traces. Renvoie celles dont les
+    /// tags ont changé (pour réécrire leur GPX si la bibliothèque l'autorise).
+    pub fn batch_edit(&mut self, ids: &[i64], edit: &BatchEdit, now: i64) -> Result<Vec<i64>> {
+        let same = |a: &str, b: &str| a.to_lowercase() == b.to_lowercase();
+        // Collections à ajouter : par nom, créées au besoin.
+        let mut add_cols = Vec::new();
+        for name in edit.add_collections.iter().map(|n| n.trim()).filter(|n| !n.is_empty()) {
+            let existing = self.collections()?.into_iter().find(|c| same(&c.name, name));
+            add_cols.push(match existing {
+                Some(c) => c.id,
+                None => self.create_collection(name, now)?.id,
+            });
+        }
+        let mut tags_changed = Vec::new();
+        for &id in ids {
+            let t = self.get(id)?;
+            if !edit.add_tags.is_empty() || !edit.remove_tags.is_empty() {
+                let mut tags: Vec<String> =
+                    t.summary.tags.iter().filter(|x| !edit.remove_tags.iter().any(|r| same(r, x))).cloned().collect();
+                for a in edit.add_tags.iter().map(|a| a.trim()).filter(|a| !a.is_empty()) {
+                    if !tags.iter().any(|x| same(x, a)) {
+                        tags.push(a.to_string());
+                    }
+                }
+                if tags != t.summary.tags {
+                    self.set_tags(id, &tags)?;
+                    tags_changed.push(id);
+                }
+            }
+            if edit.change_sport {
+                self.set_sport(id, edit.sport.as_deref().map(str::trim).filter(|s| !s.is_empty()))?;
+            }
+            if !add_cols.is_empty() || !edit.remove_collections.is_empty() {
+                let mut cols: Vec<i64> =
+                    t.collection_ids.iter().copied().filter(|c| !edit.remove_collections.contains(c)).collect();
+                for c in &add_cols {
+                    if !cols.contains(c) {
+                        cols.push(*c);
+                    }
+                }
+                self.set_trace_collections(id, &cols)?;
+            }
+        }
+        Ok(tags_changed)
+    }
 }

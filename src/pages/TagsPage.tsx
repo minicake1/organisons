@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ActionIcon, Anchor, Badge, Button, Group, Modal, Paper, Stack, Table, Text, TextInput, Title, Tooltip } from '@mantine/core'
+import { ActionIcon, Anchor, Badge, Button, Checkbox, Group, Modal, Paper, Stack, Switch, Table, TagsInput, Text, TextInput, Title, Tooltip } from '@mantine/core'
 import { IconPencil, IconTrash } from '@tabler/icons-react'
 import { api, type TagCount } from '../api'
 
@@ -12,6 +12,8 @@ export default function TagsPage({ onOpenTag }: { onOpenTag: (tag: string) => vo
   const [newName, setNewName] = useState('')
   const [deleting, setDeleting] = useState<TagCount | null>(null)
   const [query, setQuery] = useState('')
+  const [created, setCreated] = useState("")
+  const [createAuto, setCreateAuto] = useState(true)
 
   const refresh = () => api.tagCounts().then(setTags).catch((e) => setError(String(e)))
   useEffect(() => {
@@ -32,13 +34,49 @@ export default function TagsPage({ onOpenTag }: { onOpenTag: (tag: string) => vo
   const shown = tags.filter((t) => t.tag.toLowerCase().includes(query.trim().toLowerCase()))
 
   return (
-    <Stack gap="md" maw={760}>
+    <Stack gap="md" maw={1040}>
       <Group>
         <Title order={2} mr="auto">
           Tags
         </Title>
         <TextInput placeholder="Rechercher un tag" value={query} onChange={(e) => setQuery(e.currentTarget.value)} w={240} />
       </Group>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          const name = created.trim()
+          if (!name) return
+          setError(null)
+          api
+            .createTag(name)
+            .then(() => (createAuto ? api.setTagAuto(name, true) : undefined))
+            .then(() => {
+              setCreated("")
+              refresh()
+            })
+            .catch((err) => setError(String(err)))
+        }}
+      >
+        <Group gap="xs" align="flex-end">
+          <TextInput
+            label="Nouveau tag"
+            description="Proposé dans le champ Tags des fiches ; avec la détection, aussi suggéré sur les traces dont le titre le contient. Aucune trace n’est modifiée."
+            placeholder="Ex. BRM 2027"
+            value={created}
+            onChange={(e) => setCreated(e.currentTarget.value)}
+            style={{ flex: 1 }}
+          />
+          <Checkbox
+            label="Détecter dans les titres"
+            checked={createAuto}
+            onChange={(e) => setCreateAuto(e.currentTarget.checked)}
+            mb={8}
+          />
+          <Button type="submit" disabled={!created.trim()}>
+            Créer
+          </Button>
+        </Group>
+      </form>
       {error && (
         <Text c="red" size="sm">
           {error}
@@ -59,7 +97,7 @@ export default function TagsPage({ onOpenTag }: { onOpenTag: (tag: string) => vo
       <Paper withBorder radius="md">
         {tags.length === 0 ? (
           <Text p="md" c="dimmed" size="sm">
-            Aucun tag pour l'instant. On en ajoute depuis la fiche d'une trace.
+            Aucun tag pour l’instant. Crée-en un ci-dessus, ou depuis la fiche d’une trace.
           </Text>
         ) : (
           <Table verticalSpacing="xs" highlightOnHover>
@@ -67,6 +105,16 @@ export default function TagsPage({ onOpenTag }: { onOpenTag: (tag: string) => vo
               <Table.Tr>
                 <Table.Th>Tag</Table.Th>
                 <Table.Th w={110}>Traces</Table.Th>
+                <Table.Th w={150}>
+                  <Tooltip label="Proposé sur les traces dont le titre ou les infos du GPX le contiennent (ex. NP# pour « np#614 »)" multiline w={260}>
+                    <span>Détection auto</span>
+                  </Tooltip>
+                </Table.Th>
+                <Table.Th>
+                  <Tooltip label="Autres mots qui font proposer ce tag (ex. « np# » ou « nantes pédale » pour NP#). En ajouter active la détection." multiline w={280}>
+                    <span>Mots-clés de détection</span>
+                  </Tooltip>
+                </Table.Th>
                 <Table.Th w={90} />
               </Table.Tr>
             </Table.Thead>
@@ -81,6 +129,37 @@ export default function TagsPage({ onOpenTag }: { onOpenTag: (tag: string) => vo
                     </Anchor>
                   </Table.Td>
                   <Table.Td>{t.count}</Table.Td>
+                  <Table.Td>
+                    <Switch
+                      size="sm"
+                      aria-label={`Détecter ${t.tag} automatiquement`}
+                      checked={t.auto}
+                      onChange={(e) => {
+                        const auto = e.currentTarget.checked
+                        setTags((ts) => ts.map((x) => (x.tag === t.tag ? { ...x, auto } : x)))
+                        // Rechargé : le nom du tag apparaît dans ses mots-clés à l’activation.
+                        api.setTagAuto(t.tag, auto).then(refresh).catch((err) => {
+                          setError(String(err))
+                          refresh()
+                        })
+                      }}
+                    />
+                  </Table.Td>
+                  <Table.Td>
+                    <TagsInput
+                      size="xs"
+                      aria-label={`Mots-clés de détection de ${t.tag}`}
+                      placeholder={t.keywords.length ? '' : 'Ajouter un mot-clé'}
+                      value={t.keywords}
+                      onChange={(keywords) => {
+                        setTags((ts) => ts.map((x) => (x.tag === t.tag ? { ...x, keywords, auto: x.auto || keywords.length > x.keywords.length } : x)))
+                        api.setTagKeywords(t.tag, keywords).then(refresh).catch((err) => {
+                          setError(String(err))
+                          refresh()
+                        })
+                      }}
+                    />
+                  </Table.Td>
                   <Table.Td>
                     <Group gap={4} justify="flex-end" wrap="nowrap">
                       <Tooltip label="Renommer ou fusionner">

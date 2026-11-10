@@ -19,8 +19,14 @@ use crate::model::{Library, ScanReport, TraceAnalysis};
 /// (même taille, même date) ne sont pas relus ; ceux qui ont disparu
 /// sortent de l'index.
 pub fn scan_library(index: &mut Index, library: &Library, now: i64) -> Result<ScanReport> {
+    // NAS éteint ou débranché : surtout ne rien retirer de l'index (tags, notes,
+    // collections seraient perdus). La bibliothèque reste consultable hors ligne.
+    if !Path::new(&library.path).is_dir() {
+        return Err(Error::Invalid(format!("{} : dossier injoignable ({})", library.name, library.path)));
+    }
     let mut report = ScanReport::default();
     let mut seen = HashSet::new();
+    let mut walk_failed = false;
     let walker = WalkDir::new(&library.path).follow_links(true).into_iter().filter_entry(|e| {
         e.depth() == 0 || !e.file_name().to_string_lossy().starts_with('.')
     });
@@ -28,6 +34,7 @@ pub fn scan_library(index: &mut Index, library: &Library, now: i64) -> Result<Sc
         let entry = match entry {
             Ok(e) => e,
             Err(e) => {
+                walk_failed = true;
                 report.errors.push(e.to_string());
                 continue;
             }
@@ -46,7 +53,12 @@ pub fn scan_library(index: &mut Index, library: &Library, now: i64) -> Result<Sc
             Err(e) => report.errors.push(e.to_string()),
         }
     }
-    report.removed = index.remove_missing(library.id, &seen)?;
+    // Lecture incomplète (dossier illisible, NAS coupé en cours) : on ne retire rien.
+    if walk_failed {
+        report.errors.push(format!("{} : lecture incomplète, aucune trace retirée de l’index", library.name));
+    } else {
+        report.removed = index.remove_missing(library.id, &seen)?;
+    }
     Ok(report)
 }
 

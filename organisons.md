@@ -67,6 +67,18 @@ Tout le texte visible par l'utilisateur est en français.
 
 Maquettes (canevas claude.ai, version « v0.1 ») : https://claude.ai/artifact/UgMG2meavfQnAP5ptqqBpY
 
+## Choix validés pour la v0.3 (09/11/2026)
+
+- **Tags automatiques** (`autotags.rs`) : règles intégrées, plus les tags de l’utilisateur avec « Détection auto » et leurs mots-clés (onglet Tags, `tag_names.auto` et `tag_names.keywords` ; activer la détection met le nom du tag dans ses mots-clés, que l’on peut ensuite retirer ; ajouter un mot-clé active la détection ; recherche `text_has_tag` dans `traces.hint_text` : titre brut, `<desc>`, `<keywords>`). Tags créables sans trace (`tag_names`). détectés dans le titre brut, `<desc>` et `<keywords>` (BRM + distance, brevet, audax, gravel…), **proposés à valider** : badge « + » pour ajouter, « × » pour ne plus proposer (`tags_ignored`). Sur la fiche et juste après un import.
+- **Doublons à l’import** (`organize::check_import`) : avant la copie, fenêtre « fichier identique » / « même parcours probable » (mêmes critères que la page Doublons, `index::similar_routes`) ; l’utilisateur coche ce qu’il importe.
+- **NAS hors ligne** : consultation seule depuis l’index. `scan_library` refuse un dossier injoignable et ne retire rien après une lecture incomplète (sinon tags, notes et collections étaient perdus). `offline_libraries` (vérifié en parallèle) masque Importer/Ranger et grise « Ouvrir le dossier ».
+- **Modèle de rangement** modifiable dans Réglages (`PatternEditor`, `organize::validate_pattern` : chemin relatif, variables connues, `{nom}` dans le nom du fichier ; exemple affiché).
+- **Tri par sport** ; tri par nom « naturel » (collation SQLite `NATUREL`, `index::natural_cmp` : np#2 avant np#10 ; `NATURAL` est un mot réservé) ; vignettes redessinées quand leur cadre change de taille (ResizeObserver).
+- **Collections** : ouvrir une collection l’affiche dans l’onglet Collections (route `collection`, `LibraryPage` avec `onBack`), avec tous les affichages et filtres.
+- **Modification par lot** : bouton « Sélectionner » (Bibliothèque et vue de collection), cases sur les tuiles et les lignes, barre « N sélectionnée(s) », fenêtre `BatchEditModal` : ajouter/retirer des tags, changer le sport (vide = retour au GPX), ajouter (création par nom) ou retirer des collections. `Index::batch_edit`, puis réécriture des GPX dont les tags changent.
+- **Suppression d’une trace** : croix sur la tuile, corbeille en bout de ligne (liste, liste + carte), bouton « Supprimer » sur la fiche ; toujours confirmée (`TrashButton`). Le GPX va dans `.organisons-corbeille` de sa bibliothèque (`organize::trash_trace`, préfixe date), récupérable jusqu’au vidage : onglet Corbeille (au-dessus de Réglages, `TrashPage`) avec la liste, « Restaurer » (`restore_from_trash` : retour à la racine de la bibliothèque sous le nom d’origine, réindexé) et le vidage manuel ou auto 7/14/30 jours (`trash_purge_days`). Icônes de suppression à 45 % d’opacité, 100 % au survol (`.trash-faded`). Même mécanisme que les doublons mis de côté (`move_aside`, `purge_aside`).
+- **Données de développement séparées** : `npm run tauri dev` utilise `index-dev.sqlite` (copie de `index.sqlite` au premier lancement) ; la version installée garde `index.sqlite`.
+
 ## Build et dépôt
 
 - Lancement sous Windows 11 validé le 09/11/2026 (`npm run tauri dev`).
@@ -75,13 +87,6 @@ Maquettes (canevas claude.ai, version « v0.1 ») : https://claude.ai/artifact/U
 - Dépôt GitHub privé : https://github.com/minicake1/organisons (`gh` installé dans `C:\Program Files\GitHub CLI\`).
 
 ## Feuille de route
-
-### v0.3 : finitions et réglages
-- **Vignettes** : en passant de fenêtre à plein écran, elles ne se redessinent pas toutes seules (Ctrl+R nécessaire). Piste : recalculer à la taille du cadre (ResizeObserver) dans `TrackThumb.tsx`.
-- **Données de développement** : `npm run tauri dev` et la version installée partagent le même index (même identifiant d’appli). Les séparer ; la version installée garde la bibliothèque actuelle.
-- **Réglages** : modèle de rangement modifiable (la maquette Stockage montre un champ et les variables), détection des doublons à l’import, cache hors ligne du NAS.
-- **Tags automatiques** : proposer des tags détectés dans le titre et les métadonnées du GPX (`<desc>`, `<keywords>`, `<type>`, créateur…), par exemple « BRM », « 600 », « Gravel » ; à valider ou appliquer selon un réglage.
-- **Tri par sport** dans la Bibliothèque (en plus des tris actuels).
 
 ### v0.4 : tours
 - **Tours** : une collection de type « tour » qui regroupe plusieurs traces (étapes) dans une seule vue : carte avec toutes les étapes, profil enchaîné, bornes et POI de l’ensemble.

@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 export type Hilliness = 'FLAT' | 'HILLY' | 'MOUNTAINOUS'
 export type Wind = 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW'
 export type PoiKind = 'control' | 'warning' | 'water' | 'shop' | 'sight' | 'other'
-export type SortKey = 'date' | 'distance' | 'elevation' | 'hilliness' | 'name'
+export type SortKey = 'date' | 'distance' | 'elevation' | 'hilliness' | 'name' | 'sport'
 
 export interface Library {
   id: number
@@ -27,7 +27,17 @@ export interface OrganizeReport {
   moved: number
   imported: number
   errors: string[]
+  importedIds: number[]
 }
+/** Fichier à importer comparé à la bibliothèque. */
+export interface ImportCheck {
+  file: string
+  name: string
+  status: 'new' | 'identical' | 'probable' | 'error'
+  matches: string[]
+  error: string | null
+}
+
 
 export interface TraceSummary {
   id: number
@@ -89,6 +99,8 @@ export interface TraceDetail extends TraceSummary {
   profile: ProfilePoint[]
   /** Revêtement calculé depuis OpenStreetMap (null tant qu’il n’a pas été demandé). */
   surface: SurfaceRun[] | null
+  /** Tags détectés dans le titre et les métadonnées, à valider. */
+  tagSuggestions: string[]
   pois: Poi[]
 }
 
@@ -145,6 +157,10 @@ export interface Collection {
 export interface TagCount {
   tag: string
   count: number
+  /** Cherché automatiquement dans les titres et métadonnées des GPX. */
+  auto: boolean
+  /** Autres mots cherchés pour proposer ce tag. */
+  keywords: string[]
 }
 
 export const api = {
@@ -157,6 +173,22 @@ export const api = {
   applyOrganize: (libraryId: number, moves: PlannedMove[]) => invoke<OrganizeReport>('apply_organize', { libraryId, moves }),
   importFiles: (libraryId: number, files: string[]) => invoke<OrganizeReport>('import_files', { libraryId, files }),
   setSport: (id: number, sport: string | null) => invoke<void>('set_sport', { id, sport }),
+  ignoreTagSuggestions: (id: number, tags: string[]) => invoke<void>('ignore_tag_suggestions', { id, tags }),
+  setLibraryPattern: (id: number, pattern: string) => invoke<void>('set_library_pattern', { id, pattern }),
+  previewPattern: (pattern: string) => invoke<string>('preview_pattern', { pattern }),
+  checkImport: (files: string[]) => invoke<ImportCheck[]>('check_import', { files }),
+  offlineLibraries: () => invoke<number[]>('offline_libraries'),
+  trashTrace: (id: number) => invoke<string>('trash_trace', { id }),
+  trashInfo: () => invoke<SetAsideInfo>('trash_info'),
+  trashList: () => invoke<TrashItem[]>('trash_list'),
+  restoreTrash: (path: string) => invoke<number>('restore_trash', { path }),
+  purgeTrash: (olderThanDays?: number) => invoke<number>('purge_trash', { olderThanDays: olderThanDays ?? null }),
+  getTrashPurgeDays: () => invoke<number>('get_trash_purge_days'),
+  setTrashPurgeDays: (days: number) => invoke<void>('set_trash_purge_days', { days }),
+  createTag: (name: string) => invoke<void>('create_tag', { name }),
+  batchEdit: (ids: number[], edit: BatchEdit) => invoke<string[]>('batch_edit', { ids, edit }),
+  setTagAuto: (tag: string, auto: boolean) => invoke<void>('set_tag_auto', { tag, auto }),
+  setTagKeywords: (tag: string, keywords: string[]) => invoke<void>('set_tag_keywords', { tag, keywords }),
   setSurface: (id: number, ways: { tags: Record<string, string>; geometry: [number, number][] }[]) =>
     invoke<SurfaceRun[]>('set_surface', { id, ways }),
   sports: () => invoke<string[]>('sports'),
@@ -184,4 +216,27 @@ export const api = {
   purgeSetAside: (olderThanDays?: number) => invoke<number>('purge_set_aside', { olderThanDays }),
   getPurgeDays: () => invoke<number>('get_purge_days'),
   setPurgeDays: (days: number) => invoke<void>('set_purge_days', { days }),
+}
+
+/** Fichier de la corbeille d'Organisons. */
+export interface TrashItem {
+  path: string
+  name: string
+  file: string
+  libraryId: number
+  library: string
+  deletedAt: number
+  bytes: number
+}
+
+/** Modification de plusieurs traces à la fois. */
+export interface BatchEdit {
+  addTags?: string[]
+  removeTags?: string[]
+  /** Changer le sport ; `sport` vide = revenir au sport lu dans le GPX. */
+  changeSport?: boolean
+  sport?: string | null
+  /** Par nom ; créées si elles n'existent pas. */
+  addCollections?: string[]
+  removeCollections?: number[]
 }

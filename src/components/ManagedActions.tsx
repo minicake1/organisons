@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Button, Code, Group, Menu, Modal, ScrollArea, Stack, Table, Text } from '@mantine/core'
+import { Badge, Button, Checkbox, Code, Group, Menu, Modal, Paper, ScrollArea, Stack, Table, Text } from '@mantine/core'
 import { IconArrowsMove, IconChevronDown, IconFileImport } from '@tabler/icons-react'
 import { open } from '@tauri-apps/plugin-dialog'
-import { api, type Library, type OrganizeReport, type PlannedMove } from '../api'
+import { api, type ImportCheck, type Library, type OrganizeReport, type PlannedMove, type TraceDetail } from '../api'
+import TagSuggestions from './TagSuggestions'
 
 /** Chemin affiché relativement à la racine de la bibliothèque. */
 function rel(path: string, root: string) {
@@ -41,6 +42,10 @@ export default function ManagedActions({
   const [busy, setBusy] = useState<'import' | 'plan' | null>(null)
   const [planFor, setPlanFor] = useState<Library | null>(null)
   const [moves, setMoves] = useState<PlannedMove[]>([])
+  const [importFor, setImportFor] = useState<Library | null>(null)
+  const [checks, setChecks] = useState<ImportCheck[]>([])
+  const [chosen, setChosen] = useState<Record<string, boolean>>({})
+  const [hints, setHints] = useState<TraceDetail[]>([])
 
   if (!managed.length) return null
 
@@ -56,14 +61,75 @@ export default function ManagedActions({
     if (!files.length) return
     setBusy('import')
     try {
-      const r = await api.importFiles(l.id, files)
-      onDone(l, { text: reportText(r), errors: r.errors })
+      // Fichiers déjà présents (identiques ou même parcours) : on demande avant de copier.
+      const found = await api.checkImport(files)
+      if (found.every((c) => c.status === 'new')) await runImport(l, files)
+      else {
+        setChecks(found)
+        setChosen(Object.fromEntries(found.map((c) => [c.file, c.status === 'new'])))
+        setImportFor(l)
+      }
     } catch (e) {
       fail(l, e)
     } finally {
       setBusy(null)
     }
   }
+
+  const runImport = async (l: Library, files: string[]) => {
+    const r = await api.importFiles(l.id, files)
+    onDone(l, { text: reportText(r), errors: r.errors })
+    await proposeTags(r.importedIds)
+  }
+
+  /** Ouvre la fenêtre des tags proposés pour ces traces (s’il y en a). */
+  const proposeTags = async (ids: number[]) => {
+    const details = await Promise.all(ids.map((id) => api.getTrace(id).catch(() => null)))
+    const withHints = details.filter((t): t is TraceDetail => !!t && t.tagSuggestions.length > 0)
+    if (withHints.length) setHints(withHints)
+  }
+
+  const confirmImport = async () => {
+    if (!importFor) return
+    const l = importFor
+    const files = checks.filter((c) => chosen[c.file]).map((c) => c.file)
+    setImportFor(null)
+    if (!files.length) return
+    setBusy('import')
+    try {
+      await runImport(l, files)
+    } catch (e) {
+      fail(l, e)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const updateHint = (id: number, change: (t: TraceDetail) => TraceDetail) =>
+    setHints((hs) => hs.map((t) => (t.id === id ? change(t) : t)))
+
+  // Validation des tags proposés : pour une trace, ou par lot (un tag sur toutes les traces, ou tout).
+  const addTags = (t: TraceDetail, add: string[]) => {
+    const tags = [...t.tags, ...add.filter((a) => !t.tags.some((x) => x.toLowerCase() === a.toLowerCase()))]
+    updateHint(t.id, (x) => ({ ...x, tags, tagSuggestions: x.tagSuggestions.filter((s) => !add.includes(s)) }))
+    api.setTags(t.id, tags).catch(() => {})
+  }
+  const ignoreTags = (t: TraceDetail, ign: string[]) => {
+    updateHint(t.id, (x) => ({ ...x, tagSuggestions: x.tagSuggestions.filter((s) => !ign.includes(s)) }))
+    api.ignoreTagSuggestions(t.id, ign).catch(() => {})
+  }
+  /** `tag` absent : tous les tags proposés de toutes les traces. */
+  const batch = (mode: "add" | "ignore", tag?: string) =>
+    hints.forEach((t) => {
+      const sel = t.tagSuggestions.filter((s) => tag === undefined || s === tag)
+      if (sel.length) (mode === "add" ? addTags : ignoreTags)(t, sel)
+    })
+  const byTag = Array.from(
+    hints.reduce((m, t) => {
+      t.tagSuggestions.forEach((s) => m.set(s, (m.get(s) ?? 0) + 1))
+      return m
+    }, new Map<string, number>()),
+  ).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
 
   const showPlan = async (l: Library) => {
     setBusy('plan')
@@ -85,6 +151,8 @@ export default function ManagedActions({
     try {
       const r = await api.applyOrganize(l.id, moves)
       onDone(l, { text: reportText(r), errors: r.errors })
+      // Comme après un import : tags proposés pour les traces rangées.
+      await proposeTags(moves.map((m) => m.traceId))
     } catch (e) {
       fail(l, e)
     } finally {
@@ -167,6 +235,148 @@ export default function ManagedActions({
             </Group>
           </Stack>
         )}
+      </Modal>
+      <Modal opened={importFor !== null} onClose={() => setImportFor(null)} title={importFor ? `Importer dans « ${importFor.name} »` : ''} size="xl">
+        <Stack gap="sm">
+          <Text size="sm">
+            Certains fichiers semblent déjà être dans la bibliothèque. Coche ceux à importer quand même : rien n'est copié avant
+            ta validation.
+          </Text>
+          <ScrollArea.Autosize mah={420}>
+            <Table fz="sm" verticalSpacing={6}>
+              <Table.Tbody>
+                {checks.map((c) => (
+                  <Table.Tr key={c.file}>
+                    <Table.Td w={36}>
+                      <Checkbox
+                        aria-label={`Importer ${c.name}`}
+                        checked={!!chosen[c.file]}
+                        disabled={c.status === 'error'}
+                        onChange={(e) => {
+                          const v = e.currentTarget.checked
+                          setChosen((s) => ({ ...s, [c.file]: v }))
+                        }}
+                      />
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm" fw={600}>
+                        {c.name}
+                      </Text>
+                      {c.matches.length > 0 && (
+                        <Text size="xs" c="dimmed">
+                          Déjà présent : {c.matches.slice(0, 3).join(', ')}
+                          {c.matches.length > 3 ? ` (+${c.matches.length - 3})` : ''}
+                        </Text>
+                      )}
+                      {c.error && (
+                        <Text size="xs" c="red">
+                          {c.error}
+                        </Text>
+                      )}
+                    </Table.Td>
+                    <Table.Td w={190}>
+                      {c.status === 'new' && (
+                        <Badge color="green" variant="light">
+                          Nouveau
+                        </Badge>
+                      )}
+                      {c.status === 'identical' && (
+                        <Badge color="red" variant="light">
+                          Fichier identique
+                        </Badge>
+                      )}
+                      {c.status === 'probable' && (
+                        <Badge color="orange" variant="light">
+                          Même parcours probable
+                        </Badge>
+                      )}
+                      {c.status === 'error' && (
+                        <Badge color="gray" variant="light">
+                          Illisible
+                        </Badge>
+                      )}
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </ScrollArea.Autosize>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setImportFor(null)}>
+              Annuler
+            </Button>
+            <Button onClick={confirmImport} disabled={!checks.some((c) => chosen[c.file])}>
+              Importer {checks.filter((c) => chosen[c.file]).length} fichier(s)
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+      <Modal opened={hints.length > 0} onClose={() => setHints([])} title="Tags proposés" size="xl">
+        <Stack gap="md">
+          <Text size="sm" c="dimmed">
+            Détectés dans le titre et les informations des GPX. Rien n'est ajouté sans ton clic : par lot ci-dessous, ou trace par trace.
+          </Text>
+          {byTag.length > 0 && (
+            <Paper withBorder radius="md" p="sm">
+              <Text size="sm" fw={600} mb={6}>
+                Par tag
+              </Text>
+              <Stack gap={6}>
+                {byTag.map(([tag, n]) => (
+                  <Group key={tag} gap="xs" wrap="nowrap">
+                    <Badge variant="light" tt="none">
+                      {tag}
+                    </Badge>
+                    <Text size="xs" c="dimmed" style={{ flex: 1 }}>
+                      {n} trace(s)
+                    </Text>
+                    <Button size="compact-xs" variant="light" onClick={() => batch('add', tag)}>
+                      Ajouter {n > 1 ? `aux ${n} traces` : ''}
+                    </Button>
+                    <Button size="compact-xs" variant="subtle" color="gray" onClick={() => batch('ignore', tag)}>
+                      Ignorer
+                    </Button>
+                  </Group>
+                ))}
+              </Stack>
+            </Paper>
+          )}
+          <ScrollArea.Autosize mah={360}>
+            <Stack gap="sm">
+              {hints.map((t) => (
+                <Stack key={t.id} gap={4}>
+                  <Text size="sm" fw={600}>
+                    {t.name}
+                  </Text>
+                  {t.tags.length > 0 && (
+                    <Text size="xs" c="dimmed">
+                      Tags : {t.tags.join(', ')}
+                    </Text>
+                  )}
+                  <TagSuggestions label="" suggestions={t.tagSuggestions} onAdd={(add) => addTags(t, add)} onIgnore={(ign) => ignoreTags(t, ign)} />
+                  {t.tagSuggestions.length === 0 && (
+                    <Text size="xs" c="green.8">
+                      Fait.
+                    </Text>
+                  )}
+                </Stack>
+              ))}
+            </Stack>
+          </ScrollArea.Autosize>
+          <Group justify="flex-end">
+            {byTag.length > 0 && (
+              <>
+                <Button variant="default" onClick={() => batch('ignore')}>
+                  Tout ignorer
+                </Button>
+                <Button onClick={() => batch('add')}>Tout ajouter</Button>
+              </>
+            )}
+            <Button variant={byTag.length ? 'subtle' : 'filled'} onClick={() => setHints([])}>
+              Fermer
+            </Button>
+          </Group>
+        </Stack>
       </Modal>
     </>
   )

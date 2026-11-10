@@ -31,13 +31,18 @@ import {
   IconLayoutGrid,
   IconLayoutSidebar,
   IconList,
+  IconArrowLeft,
   IconMap,
+  IconPencil,
+  IconSquareCheck,
   IconRefresh,
   IconSearch,
 } from '@tabler/icons-react'
 import { api, type Collection, type Hilliness, type Library, type SortKey, type TraceFilter, type TraceSummary, type Wind } from '../api'
 import { HILLINESS, WINDS, date, int, km1, windLabel, windShort } from '../labels'
 import SportBadge from '../components/SportBadge'
+import TrashButton from '../components/TrashButton'
+import BatchEditModal from '../components/BatchEditModal'
 import TrackThumb from '../components/TrackThumb'
 import ManagedActions from '../components/ManagedActions'
 import WindArrow from '../components/WindArrow'
@@ -50,11 +55,14 @@ export default function LibraryPage({
   onOpen,
   onSettings,
   initialFilter,
+  onBack,
 }: {
   onOpen: (id: number) => void
   onSettings: () => void
   /** Filtre de départ (ouverture depuis l'écran Tags ou Collections). */
   initialFilter?: TraceFilter
+  /** Vue d’une collection (onglet Collections) : titre de la collection et retour. */
+  onBack?: () => void
 }) {
   const [filter, setFilter] = useState<TraceFilter>({ ...EMPTY, ...initialFilter })
   const [collections, setCollections] = useState<Collection[]>([])
@@ -71,6 +79,14 @@ export default function LibraryPage({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  // Sélection pour modifier plusieurs traces à la fois.
+  const [selecting, setSelecting] = useState(false)
+  const [picked, setPicked] = useState<number[]>([])
+  const [batchOpen, setBatchOpen] = useState(false)
+  const toggle = (id: number) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]))
+  // Bibliothèques injoignables (NAS éteint) : consultation seule.
+  const [offline, setOffline] = useState<number[]>([])
+  const checkOffline = () => api.offlineLibraries().then(setOffline).catch(() => {})
 
   const load = useCallback(() => {
     api.listTraces(filter).then(setTraces).catch((e) => setError(String(e)))
@@ -82,6 +98,7 @@ export default function LibraryPage({
   }, [load])
   useEffect(() => {
     api.listLibraries().then(setLibraries).catch(() => {})
+    checkOffline()
     api.allTags().then(setTags).catch(() => {})
     api.collections().then(setCollections).catch(() => {})
   }, [])
@@ -102,6 +119,7 @@ export default function LibraryPage({
       const r = await api.scanAll()
       if (r.errors.length) setError(r.errors.slice(0, 3).join('\n'))
       load()
+      checkOffline()
       api.allTags().then(setTags)
     } catch (e) {
       setError(String(e))
@@ -123,12 +141,21 @@ export default function LibraryPage({
   return (
     <Stack gap="md">
       <Group>
-        <Title order={2} mr="auto">
-          Bibliothèque
-        </Title>
+        {onBack ? (
+          <Group gap="xs" mr="auto">
+            <Button variant="subtle" leftSection={<IconArrowLeft size={16} />} onClick={onBack} px={6}>
+              Collections
+            </Button>
+            <Title order={2}>{collections.find((c) => c.id === filter.collection)?.name ?? 'Collection'}</Title>
+          </Group>
+        ) : (
+          <Title order={2} mr="auto">
+            Bibliothèque
+          </Title>
+        )}
         {libraries.some((l) => l.mode === 'managed') ? (
           <ManagedActions
-            libraries={libraries}
+            libraries={libraries.filter((l) => !offline.includes(l.id))}
             onDone={(lib, r) => {
               setNotice(`${lib.name} : ${r.text}`)
               if (r.errors.length) setError(r.errors.slice(0, 5).join('\n'))
@@ -146,6 +173,17 @@ export default function LibraryPage({
           Relire les dossiers
         </Button>
       </Group>
+
+      {offline.length > 0 && (
+        <Paper withBorder p="sm" bg="yellow.0" c="yellow.9">
+          {libraries
+            .filter((l) => offline.includes(l.id))
+            .map((l) => l.name)
+            .join(", ")}{" "}
+          : dossier injoignable (NAS éteint ou hors réseau ?). Les traces restent consultables (carte, profil, tags) ; l’import, le rangement
+          et l’ouverture des fichiers reviendront quand il sera accessible.
+        </Paper>
+      )}
 
       {notice && (
         <Paper withBorder p="sm" bg="teal.0" c="teal.9" onClick={() => setNotice(null)}>
@@ -178,7 +216,50 @@ export default function LibraryPage({
             Effacer
           </Button>
         )}
+        <Button
+          ml="auto"
+          variant={selecting ? 'filled' : 'default'}
+          leftSection={<IconSquareCheck size={16} />}
+          onClick={() => {
+            setSelecting((s) => !s)
+            setPicked([])
+          }}
+        >
+          {selecting ? 'Terminer la sélection' : 'Sélectionner'}
+        </Button>
       </Group>
+
+      {selecting && (
+        <Paper withBorder p="xs" radius="md" bg="blue.0" style={{ position: 'sticky', top: 0, zIndex: 5 }}>
+          <Group gap="sm">
+            <Text size="sm" fw={600}>
+              {picked.length} trace(s) sélectionnée(s)
+            </Text>
+            <Button size="compact-sm" variant="subtle" onClick={() => setPicked(traces.map((t) => t.id))}>
+              Tout sélectionner ({traces.length})
+            </Button>
+            <Button size="compact-sm" variant="subtle" onClick={() => setPicked([])} disabled={!picked.length}>
+              Aucune
+            </Button>
+            <Button size="compact-sm" ml="auto" leftSection={<IconPencil size={14} />} disabled={!picked.length} onClick={() => setBatchOpen(true)}>
+              Modifier tags, sport, collections…
+            </Button>
+          </Group>
+        </Paper>
+      )}
+      <BatchEditModal
+        opened={batchOpen}
+        traces={traces.filter((t) => picked.includes(t.id))}
+        onClose={() => setBatchOpen(false)}
+        onDone={(message, warnings) => {
+          setBatchOpen(false)
+          setNotice(message)
+          if (warnings.length) setError(`Index à jour, mais ${warnings.length} GPX non réécrit(s) :\n${warnings.slice(0, 3).join('\n')}`)
+          load()
+          api.allTags().then(setTags).catch(() => {})
+          api.collections().then(setCollections).catch(() => {})
+        }}
+      />
 
       <Collapse in={open}>
         <Paper withBorder p="md" radius="md">
@@ -257,6 +338,7 @@ export default function LibraryPage({
                     { value: 'elevation', label: 'Dénivelé' },
                     { value: 'hilliness', label: 'Relief' },
                     { value: 'name', label: 'Nom' },
+                    { value: 'sport', label: 'Sport' },
                   ]}
                   value={filter.sort ?? 'date'}
                   onChange={(v) => set('sort', (v as SortKey) ?? 'date')}
@@ -304,9 +386,30 @@ export default function LibraryPage({
       {traces.length > 0 && view === 'grid' && (
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 3, xl: 4 }}>
           {traces.map((t) => (
-            <Card key={t.id} withBorder padding={0} radius="md" component="button" onClick={() => onOpen(t.id)} style={{ textAlign: 'left', cursor: 'pointer' }}>
+            <Card
+              key={t.id}
+              withBorder
+              padding={0}
+              radius="md"
+              role="button"
+              tabIndex={0}
+              onClick={() => (selecting ? toggle(t.id) : onOpen(t.id))}
+              onKeyDown={(e) => e.key === 'Enter' && (selecting ? toggle(t.id) : onOpen(t.id))}
+              style={{ textAlign: 'left', cursor: 'pointer', outline: picked.includes(t.id) ? '2px solid #4263eb' : undefined }}
+            >
               <Box style={{ position: "relative" }}>
                 <TrackThumb id={t.id} preview={t.preview} />
+                {selecting ? (
+                  <Checkbox
+                    aria-label={`Sélectionner ${t.name}`}
+                    checked={picked.includes(t.id)}
+                    readOnly
+                    size="md"
+                    style={{ position: "absolute", top: 8, left: 8, pointerEvents: "none" }}
+                  />
+                ) : (
+                  <TrashButton look="cross" trace={t} onTrashed={load} style={{ position: "absolute", top: 8, right: 8 }} />
+                )}
               </Box>
               <Stack gap={8} p="md">
                 <Text fw={700} lineClamp={1}>
@@ -333,13 +436,18 @@ export default function LibraryPage({
                 const on = t.id === sel?.id
                 return (
                   <UnstyledButton
+                    component="div"
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e: React.KeyboardEvent) => e.key === "Enter" && (selecting ? toggle(t.id) : setSelected(t.id))}
                     key={t.id}
-                    onClick={() => setSelected(t.id)}
+                    onClick={() => (selecting ? toggle(t.id) : setSelected(t.id))}
                     aria-pressed={on}
                     w="100%"
                     p="md"
                     style={{ display: 'flex', gap: 14, borderBottom: '1px solid #f1f3f5', background: on ? '#f4f6ff' : undefined }}
                   >
+                    {selecting && <Checkbox aria-label={`Sélectionner ${t.name}`} checked={picked.includes(t.id)} readOnly style={{ alignSelf: "center", pointerEvents: "none" }} />}
                     <div style={{ width: 6, borderRadius: 3, background: on ? '#4263eb' : '#ced4da', flex: 'none' }} />
                     <Stack gap={6} style={{ flex: 1, minWidth: 0 }}>
                       <Group gap={8} wrap="nowrap">
@@ -364,6 +472,14 @@ export default function LibraryPage({
                         </Group>
                       )}
                     </Stack>
+                    <TrashButton
+                      trace={t}
+                      onTrashed={() => {
+                        setSelected(null)
+                        load()
+                      }}
+                      style={{ alignSelf: "center", flex: "none" }}
+                    />
                   </UnstyledButton>
                 )
               })}
@@ -393,6 +509,16 @@ export default function LibraryPage({
             <Table highlightOnHover verticalSpacing="sm">
               <Table.Thead>
                 <Table.Tr>
+                  {selecting && (
+                    <Table.Th w={40}>
+                      <Checkbox
+                        aria-label="Tout sélectionner"
+                        checked={traces.length > 0 && traces.every((t) => picked.includes(t.id))}
+                        indeterminate={picked.length > 0 && !traces.every((t) => picked.includes(t.id))}
+                        onChange={(e) => setPicked(e.currentTarget.checked ? traces.map((t) => t.id) : [])}
+                      />
+                    </Table.Th>
+                  )}
                   <Table.Th>Nom</Table.Th>
                   <Table.Th>Distance</Table.Th>
                   <Table.Th>D+</Table.Th>
@@ -401,11 +527,22 @@ export default function LibraryPage({
                   <Table.Th>Vent idéal</Table.Th>
                   <Table.Th>Tags</Table.Th>
                   <Table.Th>Ajout</Table.Th>
+                  <Table.Th w={40} />
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {traces.map((t) => (
-                  <Table.Tr key={t.id} onClick={() => onOpen(t.id)} style={{ cursor: 'pointer' }}>
+                  <Table.Tr
+                    key={t.id}
+                    onClick={() => (selecting ? toggle(t.id) : onOpen(t.id))}
+                    style={{ cursor: 'pointer' }}
+                    bg={picked.includes(t.id) ? 'blue.0' : undefined}
+                  >
+                    {selecting && (
+                      <Table.Td>
+                        <Checkbox aria-label={`Sélectionner ${t.name}`} checked={picked.includes(t.id)} readOnly style={{ pointerEvents: 'none' }} />
+                      </Table.Td>
+                    )}
                     <Table.Td fw={600}>{t.name}</Table.Td>
                     <Table.Td>{km1(t.distanceKm)} km</Table.Td>
                     <Table.Td>{int(t.elevationGain)} m</Table.Td>
@@ -421,6 +558,9 @@ export default function LibraryPage({
                     </Table.Td>
                     <Table.Td>{t.tags.join(', ')}</Table.Td>
                     <Table.Td c="dimmed">{date(t.addedAt)}</Table.Td>
+                    <Table.Td>
+                      <TrashButton trace={t} onTrashed={load} />
+                    </Table.Td>
                   </Table.Tr>
                 ))}
               </Table.Tbody>

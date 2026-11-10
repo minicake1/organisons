@@ -211,6 +211,8 @@ fn remove_empty_dirs(mut dir: Option<&Path>, root: &Path) {
 
 /// Dossier caché où sont mis de côté les doublons (ignoré par la relecture).
 pub const SET_ASIDE_DIR: &str = ".organisons-doublons";
+/// Corbeille d’Organisons : traces supprimées, récupérables jusqu’au vidage.
+pub const TRASH_DIR: &str = ".organisons-corbeille";
 
 fn ymd(ts: i64) -> String {
     let d = time::OffsetDateTime::from_unix_timestamp(ts).unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
@@ -230,11 +232,11 @@ fn set_aside_at(path: &Path) -> Option<i64> {
     Some(modified.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64)
 }
 
-/// Fichiers mis de côté dans toutes les bibliothèques : (chemin, date, taille).
-fn set_aside_files(index: &Index) -> Result<Vec<(PathBuf, i64, u64)>> {
+/// Fichiers d’un dossier de côté (doublons ou corbeille) dans toutes les bibliothèques : (chemin, date, taille).
+fn aside_files(index: &Index, dir_name: &str) -> Result<Vec<(PathBuf, i64, u64)>> {
     let mut out = Vec::new();
     for lib in index.libraries()? {
-        let dir = PathBuf::from(&lib.path).join(SET_ASIDE_DIR);
+        let dir = PathBuf::from(&lib.path).join(dir_name);
         let Ok(entries) = fs::read_dir(&dir) else { continue };
         for e in entries.flatten() {
             let p = e.path();
@@ -249,7 +251,16 @@ fn set_aside_files(index: &Index) -> Result<Vec<(PathBuf, i64, u64)>> {
 
 /// Contenu des dossiers `.organisons-doublons`.
 pub fn set_aside_info(index: &Index) -> Result<SetAsideInfo> {
-    let files = set_aside_files(index)?;
+    aside_info(index, SET_ASIDE_DIR)
+}
+
+/// Contenu des corbeilles `.organisons-corbeille`.
+pub fn trash_info(index: &Index) -> Result<SetAsideInfo> {
+    aside_info(index, TRASH_DIR)
+}
+
+fn aside_info(index: &Index, dir_name: &str) -> Result<SetAsideInfo> {
+    let files = aside_files(index, dir_name)?;
     Ok(SetAsideInfo {
         count: files.len(),
         bytes: files.iter().map(|f| f.2).sum(),
@@ -261,15 +272,24 @@ pub fn set_aside_info(index: &Index) -> Result<SetAsideInfo> {
 /// à `None`) ou ceux mis de côté depuis plus de N jours. Seuls les fichiers des
 /// dossiers `.organisons-doublons` sont touchés. Renvoie le nombre supprimé.
 pub fn purge_set_aside(index: &Index, now: i64, older_than_days: Option<u32>) -> Result<usize> {
+    purge_aside(index, now, older_than_days, SET_ASIDE_DIR)
+}
+
+/// Vide la corbeille d'Organisons (tout, ou ce qui y est depuis plus de N jours).
+pub fn purge_trash(index: &Index, now: i64, older_than_days: Option<u32>) -> Result<usize> {
+    purge_aside(index, now, older_than_days, TRASH_DIR)
+}
+
+fn purge_aside(index: &Index, now: i64, older_than_days: Option<u32>, dir_name: &str) -> Result<usize> {
     let mut removed = 0;
     let mut dirs = HashSet::new();
-    for (path, at, _) in set_aside_files(index)? {
+    for (path, at, _) in aside_files(index, dir_name)? {
         let old_enough = match older_than_days {
             None => true,
             Some(days) => at > 0 && now - at >= i64::from(days) * 86_400,
         };
-        // Garde-fou : uniquement dans un dossier .organisons-doublons.
-        let parent_ok = path.parent().and_then(|p| p.file_name()).map(|n| n == SET_ASIDE_DIR).unwrap_or(false);
+        // Garde-fou : uniquement dans le dossier attendu (.organisons-doublons ou .organisons-corbeille).
+        let parent_ok = path.parent().and_then(|p| p.file_name()).map(|n| n == dir_name).unwrap_or(false);
         if old_enough && parent_ok && fs::remove_file(&path).is_ok() {
             removed += 1;
             if let Some(p) = path.parent() {
@@ -290,12 +310,23 @@ pub fn purge_set_aside(index: &Index, now: i64, older_than_days: Option<u32>) ->
 /// du jour (rien n'est supprimé), et la trace sort de l'index. Renvoie le
 /// nouveau chemin du fichier.
 pub fn set_aside(index: &Index, trace_id: i64, now: i64) -> Result<String> {
+    move_aside(index, trace_id, now, SET_ASIDE_DIR)
+}
+
+/// Met une trace à la corbeille d'Organisons : son GPX est déplacé dans
+/// `.organisons-corbeille` à la racine de sa bibliothèque (récupérable jusqu'au
+/// vidage) et la trace sort de l'index. Renvoie le nouveau chemin du fichier.
+pub fn trash_trace(index: &Index, trace_id: i64, now: i64) -> Result<String> {
+    move_aside(index, trace_id, now, TRASH_DIR)
+}
+
+fn move_aside(index: &Index, trace_id: i64, now: i64, dir_name: &str) -> Result<String> {
     let (library, path, _, _) = index.trace_file(trace_id)?;
     let from = PathBuf::from(&path);
     let root = PathBuf::from(&library.path);
     let base = from.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_else(|| "trace.gpx".into());
     let file = format!("{} {base}", ymd(now));
-    let dir = root.join(SET_ASIDE_DIR);
+    let dir = root.join(dir_name);
     fs::create_dir_all(&dir).map_err(|source| crate::Error::Io { path: dir.clone(), source })?;
     let to = unique(dir.join(&file), &HashSet::new());
     fs::rename(&from, &to).map_err(|source| crate::Error::Io { path: from.clone(), source })?;
@@ -345,11 +376,177 @@ pub fn import_files(index: &mut Index, library: &Library, files: &[String], now:
             continue;
         }
         match scan::index_file(index, library, &to, &to.to_string_lossy(), now) {
-            Ok(_) => report.imported += 1,
+            Ok(_) => {
+                report.imported += 1;
+                if let Some(id) = index.trace_id_by_path(&to.to_string_lossy())? {
+                    report.imported_ids.push(id);
+                }
+            }
             Err(e) => report.errors.push(e.to_string()),
         }
     }
     Ok(report)
+}
+
+/// Nom d'origine d'un fichier mis à la corbeille : sans le préfixe « AAAA-MM-JJ ».
+fn original_name(file: &str) -> String {
+    let b = file.as_bytes();
+    if b.len() > 11 && b[4] == b'-' && b[7] == b'-' && b[10] == b' ' && file[..4].chars().all(|c| c.is_ascii_digit()) {
+        file[11..].to_string()
+    } else {
+        file.to_string()
+    }
+}
+
+/// Contenu de la corbeille, le plus récent d'abord.
+pub fn trash_list(index: &Index) -> Result<Vec<crate::model::TrashItem>> {
+    let mut out = Vec::new();
+    for lib in index.libraries()? {
+        let dir = PathBuf::from(&lib.path).join(TRASH_DIR);
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for e in entries.flatten() {
+            let p = e.path();
+            if !p.is_file() {
+                continue;
+            }
+            let file = p.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
+            let original = original_name(&file);
+            let name = analyze_file(&p).map(|a| a.name).unwrap_or_else(|_| {
+                Path::new(&original).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or(original.clone())
+            });
+            out.push(crate::model::TrashItem {
+                path: p.to_string_lossy().to_string(),
+                name,
+                file: original,
+                library_id: lib.id,
+                library: lib.name.clone(),
+                deleted_at: set_aside_at(&p).unwrap_or(0),
+                bytes: e.metadata().map(|m| m.len()).unwrap_or(0),
+            });
+        }
+    }
+    out.sort_by(|a, b| b.deleted_at.cmp(&a.deleted_at).then(a.name.cmp(&b.name)));
+    Ok(out)
+}
+
+/// Restaure un fichier de la corbeille : il revient à la racine de sa
+/// bibliothèque sous son nom d'origine (« Ranger » le remettra à sa place) et
+/// la trace est de nouveau indexée. Renvoie l'identifiant de la trace.
+pub fn restore_from_trash(index: &mut Index, path: &str, now: i64) -> Result<i64> {
+    let from = PathBuf::from(path);
+    // Garde-fou : uniquement un fichier d'une corbeille de bibliothèque connue.
+    let lib = index
+        .libraries()?
+        .into_iter()
+        .find(|l| from.parent() == Some(PathBuf::from(&l.path).join(TRASH_DIR).as_path()))
+        .ok_or_else(|| crate::Error::Invalid("Ce fichier n'est pas dans une corbeille d'Organisons.".into()))?;
+    let root = PathBuf::from(&lib.path);
+    let file = from.file_name().map(|f| original_name(&f.to_string_lossy())).unwrap_or_else(|| "trace.gpx".into());
+    let to = unique(root.join(file), &HashSet::new());
+    fs::rename(&from, &to).map_err(|source| crate::Error::Io { path: from.clone(), source })?;
+    remove_empty_dirs(from.parent(), &root);
+    let key = to.to_string_lossy().to_string();
+    scan::index_file(index, &lib, &to, &key, now)?;
+    index.trace_id_by_path(&key)?.ok_or_else(|| crate::Error::NotFound(key))
+}
+
+/// Compare des fichiers à importer avec l'index, sans rien copier : même fichier
+/// déjà présent (empreinte), ou même parcours probable (critères des Doublons).
+pub fn check_import(index: &Index, files: &[String]) -> Result<Vec<crate::model::ImportCheck>> {
+    use crate::index::{similar_routes, RouteKey};
+    let existing = index.list(&crate::model::TraceFilter::default())?;
+    let mut out = Vec::new();
+    for file in files {
+        let path = Path::new(file);
+        let fallback = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+        let analysis = match analyze_file(path) {
+            Ok(a) => a,
+            Err(e) => {
+                out.push(crate::model::ImportCheck {
+                    file: file.clone(),
+                    name: fallback,
+                    status: "error".into(),
+                    matches: vec![],
+                    error: Some(e.to_string()),
+                });
+                continue;
+            }
+        };
+        let same_file = index.names_by_hash(&scan::sha256_file(path)?)?;
+        let key = RouteKey {
+            distance_km: analysis.distance_km,
+            elevation_gain: analysis.elevation_gain,
+            start: analysis.profile.first().map(|p| [p.lat, p.lon]),
+            end: analysis.profile.last().map(|p| [p.lat, p.lon]),
+        };
+        let (status, matches) = if !same_file.is_empty() {
+            ("identical", same_file)
+        } else {
+            let similar: Vec<String> =
+                existing.iter().filter(|t| similar_routes(&key, &RouteKey::of(t))).map(|t| t.name.clone()).collect();
+            if similar.is_empty() { ("new", similar) } else { ("probable", similar) }
+        };
+        out.push(crate::model::ImportCheck {
+            file: file.clone(),
+            name: analysis.name,
+            status: status.into(),
+            matches,
+            error: None,
+        });
+    }
+    Ok(out)
+}
+
+/// Modèle de rangement par défaut.
+pub const DEFAULT_PATTERN: &str = "{sport}/{annee}/{nom}.gpx";
+const PATTERN_VARS: [&str; 7] = ["{sport}", "{annee}", "{année}", "{mois}", "{source}", "{collection}", "{nom}"];
+
+/// Vérifie un modèle de rangement saisi dans les Réglages : chemin relatif à la
+/// bibliothèque, variables connues, `{nom}` dans le nom du fichier.
+pub fn validate_pattern(pattern: &str) -> Result<()> {
+    let p = pattern.trim();
+    let bad = |m: &str| Err(crate::Error::Invalid(m.to_string()));
+    if p.is_empty() {
+        return bad("Le modèle est vide.");
+    }
+    if p.starts_with(['/', '\\']) || p.contains(':') {
+        return bad("Le modèle doit être un chemin relatif à la bibliothèque (sans lecteur ni « / » au début).");
+    }
+    let parts: Vec<&str> = p.split(['/', '\\']).collect();
+    if parts.iter().any(|s| s.trim().is_empty() || *s == "." || *s == "..") {
+        return bad("Le modèle contient un dossier vide, « . » ou « .. ».");
+    }
+    let mut rest = p.to_string();
+    for v in PATTERN_VARS {
+        rest = rest.replace(v, "");
+    }
+    if let Some(i) = rest.find('{') {
+        let unknown: String = rest[i..].chars().take_while(|c| *c != '}').chain(['}']).collect();
+        return bad(&format!("Variable inconnue : {unknown}"));
+    }
+    if rest.contains('}') {
+        return bad("Accolade « } » sans « { ».");
+    }
+    if !parts.last().is_some_and(|f| f.contains("{nom}")) {
+        return bad("Le nom du fichier (dernière partie) doit contenir {nom}.");
+    }
+    Ok(())
+}
+
+/// Exemple de chemin produit par un modèle (relatif à la bibliothèque), pour les Réglages.
+pub fn pattern_example(pattern: &str) -> Result<String> {
+    validate_pattern(pattern)?;
+    let lib = Library {
+        id: 0,
+        name: String::new(),
+        path: String::new(),
+        mode: "managed".into(),
+        pattern: pattern.trim().to_string(),
+        write_gpx: false,
+    };
+    // 27 août 2022
+    let v = PathVars { name: "Le Mythique SBC SPIDER", sport: "Gravel", date: 1_661_601_600, source: "local", collection: Some("Sorties club") };
+    Ok(target_path(&lib, &v).to_string_lossy().replace('\\', "/"))
 }
 
 #[cfg(test)]
@@ -373,6 +570,20 @@ mod tests {
         assert_eq!(sanitize("  ...  "), "Sans nom");
         assert_eq!(sanitize("con"), "con_");
         assert_eq!(sanitize("Fin."), "Fin");
+    }
+
+    #[test]
+    fn modeles_de_rangement() {
+        assert!(validate_pattern(DEFAULT_PATTERN).is_ok());
+        assert!(validate_pattern("{source}/{collection}/{année}-{mois} {nom}").is_ok());
+        assert!(validate_pattern("").is_err());
+        assert!(validate_pattern("C:/gpx/{nom}").is_err());
+        assert!(validate_pattern("../{nom}.gpx").is_err());
+        assert!(validate_pattern("{sport}/{nom}/fichier.gpx").is_err(), "{{nom}} doit être dans le nom du fichier");
+        let e = validate_pattern("{sport}/{ville}/{nom}").unwrap_err().to_string();
+        assert!(e.contains("{ville}"), "{e}");
+        assert_eq!(pattern_example(DEFAULT_PATTERN).unwrap(), "Gravel/2022/Le Mythique SBC SPIDER.gpx");
+        assert_eq!(pattern_example("{annee}/{mois} {nom}").unwrap(), "2022/08 Le Mythique SBC SPIDER.gpx");
     }
 
     #[test]

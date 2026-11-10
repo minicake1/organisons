@@ -10,31 +10,51 @@ export default function TrackThumb({ id, preview, height = 160 }: { id?: number;
   const box = useRef<HTMLDivElement | null>(null)
   const key = id != null && preview.length > 1 ? `${id}:${preview.length}:${preview[0].join(',')}:${preview[preview.length - 1].join(',')}` : null
   const [img, setImg] = useState<string | null>(null)
+  const [visible, setVisible] = useState(false)
+  // Largeur affichée, arrondie à 20 px (réutilise le cache, évite de redessiner pour 1 px).
+  const [width, setWidth] = useState(0)
 
+  // Visible une fois → on garde l'image ; taille suivie en continu (fenêtre ↔ plein écran).
   useEffect(() => {
-    if (!key || !box.current) return
-    let cancel = () => {}
-    let alive = true
+    const el = box.current
+    if (!key || !el) return
     const io = new IntersectionObserver(
       (entries) => {
-        if (!entries.some((e) => e.isIntersecting)) return
-        io.disconnect()
-        // Rendue à la taille affichée (largeur arrondie à 20 px pour réutiliser le cache).
-        const w = Math.round((box.current?.clientWidth || THUMB_W) / 20) * 20
-        const r = requestThumb(key, preview, w, height)
-        cancel = r.cancel
-        if (r.cached) setImg(r.cached)
-        r.promise?.then((url) => alive && setImg(url)).catch(() => {})
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisible(true)
+          io.disconnect()
+        }
       },
       { rootMargin: '200px' },
     )
-    io.observe(box.current)
+    io.observe(el)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const ro = new ResizeObserver(() => {
+      // On attend la fin du redimensionnement avant de redessiner.
+      clearTimeout(timer)
+      timer = setTimeout(() => setWidth(Math.round((el.clientWidth || THUMB_W) / 20) * 20), 250)
+    })
+    ro.observe(el)
+    setWidth(Math.round((el.clientWidth || THUMB_W) / 20) * 20)
+    return () => {
+      io.disconnect()
+      ro.disconnect()
+      clearTimeout(timer)
+    }
+  }, [key])
+
+  useEffect(() => {
+    if (!key || !visible || width <= 0) return
+    let alive = true
+    // L'image précédente reste affichée (étirée) pendant le nouveau rendu.
+    const r = requestThumb(key, preview, width, height)
+    if (r.cached) setImg(r.cached)
+    r.promise?.then((url) => alive && setImg(url)).catch(() => {})
     return () => {
       alive = false
-      io.disconnect()
-      cancel()
+      r.cancel()
     }
-  }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [key, visible, width, height]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div ref={box} style={{ position: 'relative', height, background: '#eef1ea', overflow: 'hidden' }}>

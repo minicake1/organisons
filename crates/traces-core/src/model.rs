@@ -194,6 +194,10 @@ pub struct TraceAnalysis {
     pub date: Option<i64>,
     /// Identifiant de parcours retiré du titre (Openrunner : « …-15424659 »), gardé dans les notes.
     pub route_id: Option<String>,
+    /// Tags proposés (titre, description, mots-clés du GPX), à valider par l’utilisateur.
+    pub tag_hints: Vec<String>,
+    /// Titre brut, description et mots-clés : on y cherche les tags choisis pour la détection.
+    pub hint_text: String,
     pub profile: Vec<ProfilePoint>,
     pub pois: Vec<Poi>,
 }
@@ -238,6 +242,8 @@ pub struct TraceDetail {
     pub profile: Vec<ProfilePoint>,
     /// Revêtement calculé depuis OpenStreetMap (absent tant qu'il n'a pas été demandé).
     pub surface: Option<Vec<crate::surface::SurfaceRun>>,
+    /// Tags proposés (détectés dans le titre et les métadonnées), pas encore posés ni écartés.
+    pub tag_suggestions: Vec<String>,
     pub pois: Vec<Poi>,
 }
 
@@ -254,6 +260,10 @@ pub struct Collection {
 pub struct TagCount {
     pub tag: String,
     pub count: i64,
+    /// Cherché automatiquement dans les titres et métadonnées.
+    pub auto: bool,
+    /// Autres mots cherchés pour proposer ce tag (en plus de son nom).
+    pub keywords: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -282,6 +292,9 @@ pub struct PlannedMove {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrganizeReport {
+    /// Traces importées (pour proposer leurs tags juste après).
+    #[serde(default)]
+    pub imported_ids: Vec<i64>,
     pub moved: usize,
     pub imported: usize,
     pub errors: Vec<String>,
@@ -296,6 +309,8 @@ pub enum SortKey {
     Elevation,
     Hilliness,
     Name,
+    /// Sport, puis nom.
+    Sport,
 }
 
 /// Filtres de la bibliothèque (repris de Pédalons + source, tags, vent ±45°).
@@ -356,4 +371,49 @@ pub struct DuplicateSet {
     /// "identical" (même fichier, octet pour octet) ou "probable" (même parcours).
     pub kind: String,
     pub traces: Vec<TraceSummary>,
+}
+
+/// Fichier à importer, comparé à l'index avant la copie.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportCheck {
+    pub file: String,
+    pub name: String,
+    /// "new", "identical" (même fichier déjà indexé), "probable" (même parcours) ou "error"
+    pub status: String,
+    /// Noms des traces déjà présentes qui lui ressemblent.
+    pub matches: Vec<String>,
+    pub error: Option<String>,
+}
+
+/// Fichier de la corbeille d'Organisons.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrashItem {
+    /// Chemin dans `.organisons-corbeille`.
+    pub path: String,
+    /// Nom de la trace (lu dans le GPX).
+    pub name: String,
+    /// Nom de fichier d'origine.
+    pub file: String,
+    pub library_id: i64,
+    pub library: String,
+    /// Date de mise à la corbeille (secondes Unix).
+    pub deleted_at: i64,
+    pub bytes: u64,
+}
+
+/// Modification de plusieurs traces à la fois (sélection de la Bibliothèque).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BatchEdit {
+    pub add_tags: Vec<String>,
+    pub remove_tags: Vec<String>,
+    /// Changer le sport des traces (sinon il reste tel quel).
+    pub change_sport: bool,
+    /// Nouveau sport ; vide : retour au sport lu dans le GPX.
+    pub sport: Option<String>,
+    /// Collections à ajouter, par nom (créées si elles n'existent pas).
+    pub add_collections: Vec<String>,
+    pub remove_collections: Vec<i64>,
 }

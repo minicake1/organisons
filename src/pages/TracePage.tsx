@@ -25,6 +25,8 @@ import { IconArrowLeft, IconCheck, IconChevronDown, IconDeviceWatch, IconFolderO
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
 import { api, type Collection, type Poi, type PoiKind, type TraceDetail } from '../api'
 import SportBadge from '../components/SportBadge'
+import TagSuggestions from '../components/TagSuggestions'
+import TrashButton from '../components/TrashButton'
 import { HILLINESS, POI_KINDS, SURFACE_CLASSES, int, km1, poiKind, slopeColor, surfaceColor, windLabel } from '../labels'
 import { computeSurface } from '../osmSurface'
 import ElevationProfile from '../components/ElevationProfile'
@@ -46,6 +48,7 @@ export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: {
   const [poiOrder, setPoiOrder] = useState<'km' | 'kind'>('kind')
   const [folded, setFolded] = useState<Partial<Record<PoiKind, boolean>>>({})
   const [editing, setEditing] = useState(false)
+  const [offline, setOffline] = useState<number[]>([])
   // Partie de la trace visible sur la carte : le profil suit le zoom.
   const [range, setRange] = useState<[number, number] | null>(null)
 
@@ -54,6 +57,7 @@ export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: {
     api.allTags().then(setAllTags).catch(() => {})
     api.sports().then(setSports).catch(() => {})
     api.collections().then(setCollections).catch(() => {})
+    api.offlineLibraries().then(setOffline).catch(() => {})
   }, [id])
 
   /** Enregistre ; si l'écriture dans le GPX échoue, l'index est à jour et on le signale. */
@@ -150,9 +154,17 @@ export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: {
           </Badge>
         )}
         <Group gap="xs" ml="auto">
-          <Button variant="default" leftSection={<IconFolderOpen size={16} />} onClick={() => revealItemInDir(t.path)}>
+          <Tooltip label="Dossier injoignable (NAS éteint ?) : la trace reste consultable ici." disabled={!offline.includes(t.libraryId)}>
+            <Button
+              variant="default"
+              leftSection={<IconFolderOpen size={16} />}
+              disabled={offline.includes(t.libraryId)}
+              onClick={() => revealItemInDir(t.path)}
+            >
             Ouvrir le dossier
-          </Button>
+            </Button>
+          </Tooltip>
+          <TrashButton look="button" trace={t} onTrashed={onBack} />
           <Tooltip label="Prévu dans une prochaine version (Garmin, Hammerhead, Wahoo, Edge en USB)">
             <Button variant="default" leftSection={<IconDeviceWatch size={16} />} data-disabled onClick={(e) => e.preventDefault()}>
               Envoyer vers l'appareil
@@ -357,6 +369,18 @@ export default function TracePage({ id, onBack, backLabel = 'Bibliothèque' }: {
               ) : (
                 <ClassementView t={t} collections={collections} />
               )}
+              <TagSuggestions
+                suggestions={t.tagSuggestions.filter((s) => !t.tags.some((x) => x.toLowerCase() === s.toLowerCase()))}
+                onAdd={(add) => {
+                  const tags = [...t.tags, ...add.filter((a) => !t.tags.some((x) => x.toLowerCase() === a.toLowerCase()))]
+                  setT({ ...t, tags, tagSuggestions: t.tagSuggestions.filter((s) => !add.includes(s)) })
+                  save(api.setTags(t.id, tags))
+                }}
+                onIgnore={(ign) => {
+                  setT({ ...t, tagSuggestions: t.tagSuggestions.filter((s) => !ign.includes(s)) })
+                  save(api.ignoreTagSuggestions(t.id, ign))
+                }}
+              />
               {saveError && !editing && (
                 <Text size="xs" c="red">
                   {saveError}

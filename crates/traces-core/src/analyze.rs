@@ -175,6 +175,14 @@ pub fn analyze_gpx(gpx: &gpx::Gpx, fallback_name: &str) -> Option<TraceAnalysis>
     let name = crate::naming::clean_name(&raw_name);
     let title_date = crate::naming::date_in_name(&raw_name).and_then(|d| d.timestamp());
     let route_id = crate::naming::route_id(&raw_name);
+    let description = gpx
+        .metadata
+        .as_ref()
+        .and_then(|m| m.description.clone())
+        .or_else(|| gpx.tracks.iter().find_map(|t| t.description.clone()));
+    let keywords = gpx.metadata.as_ref().and_then(|m| m.keywords.clone());
+    let tag_hints = crate::autotags::suggest(&raw_name, description.as_deref(), keywords.as_deref());
+    let hint_text = crate::autotags::hint_text(&raw_name, description.as_deref(), keywords.as_deref());
 
     let pois = gpx
         .waypoints
@@ -230,6 +238,8 @@ pub fn analyze_gpx(gpx: &gpx::Gpx, fallback_name: &str) -> Option<TraceAnalysis>
                 .or_else(|| raw.iter().find_map(|p| p.time).map(|t| t as i64))
         }),
         route_id,
+        tag_hints,
+        hint_text,
         profile,
         pois,
     })

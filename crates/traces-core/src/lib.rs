@@ -4,6 +4,7 @@
 //! Aucune dépendance à Tauri : ce crate se teste seul (`cargo test -p traces-core`).
 
 pub mod analyze;
+pub mod autotags;
 pub mod error;
 pub mod geo;
 pub mod gpxmeta;

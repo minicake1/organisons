@@ -4,6 +4,7 @@ import { IconFolderPlus, IconTrash } from '@tabler/icons-react'
 import { open } from '@tauri-apps/plugin-dialog'
 import { api, type Library, type ScanReport } from '../api'
 import ManagedActions, { type ActionResult } from '../components/ManagedActions'
+import PatternEditor from '../components/PatternEditor'
 
 export default function SettingsPage() {
   const [libraries, setLibraries] = useState<Library[]>([])
@@ -69,11 +70,6 @@ export default function SettingsPage() {
                   </Badge>
                 </Group>
                 <Code>{l.path}</Code>
-                {l.mode === 'managed' && (
-                  <Text size="xs" c="dimmed">
-                    Rangement : <Code>{l.pattern.replace('{annee}', '{année}')}</Code>
-                  </Text>
-                )}
               </Stack>
               <Tooltip label="Retirer de l'appli (les fichiers ne sont pas supprimés)">
                 <ActionIcon variant="subtle" color="red" aria-label={`Retirer ${l.name}`} onClick={() => api.removeLibrary(l.id).then(refresh)}>
@@ -93,6 +89,7 @@ export default function SettingsPage() {
                 <ManagedActions libraries={[l]} size="xs" onDone={(lib, r) => setLibReport((s) => ({ ...s, [lib.id]: r }))} />
               </Group>
             </Group>
+            {l.mode === 'managed' && <PatternEditor library={l} onSaved={refresh} />}
             {libReport[l.id] && (
               <Stack gap={2}>
                 <Text size="sm">{libReport[l.id].text}</Text>
@@ -155,6 +152,7 @@ export default function SettingsPage() {
           )}
         </Stack>
       </Paper>
+
     </Stack>
   )
 }

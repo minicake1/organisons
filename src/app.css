@@ -42,3 +42,6 @@ body { background: #f8f9fa; }
 .poi-tip-meta { font-size: 11px; opacity: 0.85; margin-top: 2px; }
 /* Bouton « Recentrer sur la trace » sous le zoom et le plein écran. */
 .maplibregl-ctrl button.map-recenter { display: flex; align-items: center; justify-content: center; color: #333; }
+/* Croix et corbeilles de suppression (tuiles, listes) : discrètes (45 %), pleines au survol. */
+.trash-faded { opacity: 0.45; transition: opacity 0.15s; }
+.trash-faded:hover, .trash-faded:focus-visible { opacity: 1; }
