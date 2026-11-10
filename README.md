@@ -1,4 +1,4 @@
-# Organisons, v0.4
+# Organisons, v0.5.1
 
 Application de bureau pour classer, filtrer et préparer ses traces GPX vélo, sur son PC et son NAS, dans l'esprit de Pédalons.
 Tauri 2 (cœur en Rust), React, Mantine et MapLibre. Interface en français, pour Windows (macOS prévu plus tard).

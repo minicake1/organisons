@@ -3,9 +3,9 @@
 //! (`api.openrunner.com/api/v2/routes/<id>/export/gpx-track`) ; un parcours
 //! privé est refusé et doit être exporté à la main depuis le site.
 
+use crate::http::agent;
 use std::io::Read;
 use std::path::Path;
-use std::time::Duration;
 
 const API: &str = "https://api.openrunner.com/api/v2";
 
@@ -30,12 +30,6 @@ pub fn route_id(input: &str) -> Option<String> {
     (digits.len() >= 4).then_some(digits)
 }
 
-fn agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(60))
-        .user_agent(concat!("Organisons/", env!("CARGO_PKG_VERSION")))
-        .build()
-}
 
 /// Télécharge le GPX (trace et points d'intérêt) d'un parcours public.
 pub fn download(id: &str, dest: &Path) -> Result<(), String> {
@@ -47,7 +41,7 @@ pub fn download(id: &str, dest: &Path) -> Result<(), String> {
         ureq::Error::Status(404, _) => "parcours introuvable sur Openrunner (lien erroné ou parcours supprimé)".into(),
         ureq::Error::Status(429, _) => "Openrunner limite les requêtes : réessaie dans quelques minutes".into(),
         ureq::Error::Status(code, _) => format!("Openrunner a répondu {code}"),
-        ureq::Error::Transport(t) => format!("Openrunner est injoignable (connexion internet ?) : {t}"),
+        ureq::Error::Transport(t) => crate::http::unreachable("Openrunner", t),
     })?;
     let mut bytes = Vec::new();
     resp.into_reader()

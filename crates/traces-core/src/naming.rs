@@ -37,8 +37,8 @@ fn day_month(d: &str, m: &str) -> Option<(u8, u8)> {
 fn words(name: &str) -> Vec<String> {
     let mut s = name.replace('_', " ");
     // « …-15424659 » : identifiant de parcours ajouté par Openrunner.
-    if let Some((head, tail)) = s.rsplit_once('-') {
-        if tail.trim().len() >= 5 && tail.trim().chars().all(|c| c.is_ascii_digit()) && !head.trim().is_empty() {
+    if route_id(&s).is_some() {
+        if let Some((head, _)) = s.rsplit_once('-') {
             s = head.to_string();
         }
     }
@@ -88,11 +88,14 @@ fn find_date(w: &[String]) -> Option<(NameDate, Vec<usize>)> {
     None
 }
 
-/// Identifiant de parcours en fin de titre (« …-15424659 », ajouté par Openrunner).
+/// Identifiant de parcours en fin de titre (« …-15424659 », ajouté par Openrunner) :
+/// au moins 7 chiffres collés au tiret. Un code postal (« Nantes-44000 ») ou un
+/// nombre séparé par des espaces (« Brevet - 1000000 ») ne compte pas.
 pub fn route_id(name: &str) -> Option<String> {
+    let name = name.trim_end();
     let (head, tail) = name.rsplit_once('-')?;
-    let tail = tail.trim();
-    (tail.len() >= 5 && tail.chars().all(|c| c.is_ascii_digit()) && !head.trim().is_empty()).then(|| tail.to_string())
+    let attached = !head.ends_with(char::is_whitespace) && !head.trim().is_empty();
+    (attached && tail.len() >= 7 && tail.chars().all(|c| c.is_ascii_digit())).then(|| tail.to_string())
 }
 
 /// Ligne ajoutée aux notes pour garder l'identifiant retiré du nom.
@@ -145,6 +148,14 @@ mod tests {
         let n = "BRM 600 _ Tour de Manche 2027-24118757";
         assert_eq!(clean_name(n), "BRM 600 Tour de Manche");
         assert_eq!(date_in_name(n).map(|d| d.year), Some(2027));
+        assert_eq!(route_id(n).as_deref(), Some("24118757"));
+    }
+
+    #[test]
+    fn code_postal_garde() {
+        assert_eq!(route_id("Boucle Nantes-44000"), None);
+        assert_eq!(clean_name("Boucle Nantes-44000"), "Boucle Nantes-44000");
+        assert_eq!(route_id("Brevet - 12345678"), None);
     }
 
     #[test]

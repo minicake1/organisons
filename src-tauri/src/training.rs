@@ -8,8 +8,8 @@
 //!   La séance est posée à une date du calendrier ; intervals.icu peut ensuite la
 //!   renvoyer vers d'autres services (Zwift, Garmin, MyWhoosh…).
 
+use crate::http::agent;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -85,12 +85,6 @@ fn load() -> Option<IcuAccount> {
     serde_json::from_str(&entry().ok()?.get_password().ok()?).ok()
 }
 
-fn agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(60))
-        .user_agent(concat!("Organisons/", env!("CARGO_PKG_VERSION")))
-        .build()
-}
 
 fn auth(key: &str) -> String {
     format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(format!("API_KEY:{key}")))
@@ -101,11 +95,8 @@ fn http_error(e: ureq::Error) -> String {
         ureq::Error::Status(401 | 403, _) => "intervals.icu a refusé l'accès : vérifie l'identifiant d'athlète et la clé d'API.".into(),
         ureq::Error::Status(404, _) => "intervals.icu ne trouve pas cet athlète (identifiant du type i123456).".into(),
         ureq::Error::Status(429, _) => "intervals.icu limite les requêtes : réessaie dans quelques minutes.".into(),
-        ureq::Error::Status(code, r) => {
-            let body = r.into_string().unwrap_or_default();
-            format!("intervals.icu a répondu {code} {}", body.chars().take(200).collect::<String>())
-        }
-        ureq::Error::Transport(t) => format!("intervals.icu est injoignable (connexion internet ?) : {t}"),
+        ureq::Error::Status(code, r) => crate::http::status("intervals.icu", code, r),
+        ureq::Error::Transport(t) => crate::http::unreachable("intervals.icu", t),
     }
 }
 

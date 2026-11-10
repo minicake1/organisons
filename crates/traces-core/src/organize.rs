@@ -104,8 +104,9 @@ fn unique(path: PathBuf, taken: &HashSet<String>) -> PathBuf {
         return path;
     }
     let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    let ext = path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
     for n in 2.. {
-        let candidate = path.with_file_name(format!("{stem} ({n}).gpx"));
+        let candidate = path.with_file_name(format!("{stem} ({n}){ext}"));
         if !candidate.exists() && !taken.contains(&key(&candidate)) {
             return candidate;
         }
@@ -408,6 +409,30 @@ pub fn set_aside_list(index: &Index) -> Result<Vec<crate::model::TrashItem>> {
     aside_list(index, SET_ASIDE_DIR)
 }
 
+/// Nom d'une trace lu au début du fichier, sans analyser tout le GPX (les
+/// doublons mis de côté se comptent par centaines) : nom de la piste, sinon des
+/// métadonnées, nettoyé comme à l'analyse.
+fn quick_name(path: &Path) -> Option<String> {
+    use std::io::Read;
+    let mut head = Vec::new();
+    fs::File::open(path).ok()?.take(256 * 1024).read_to_end(&mut head).ok()?;
+    let text = String::from_utf8_lossy(&head);
+    let name_after = |from: usize| -> Option<String> {
+        let start = text[from..].find("<name>")? + from + "<name>".len();
+        let end = text[start..].find("</name>")? + start;
+        let raw = text[start..end].trim();
+        let raw = raw.strip_prefix("<![CDATA[").and_then(|r| r.strip_suffix("]]>")).unwrap_or(raw);
+        let raw = raw.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&");
+        (!raw.trim().is_empty()).then(|| crate::naming::clean_name(&raw))
+    };
+    let in_metadata = || {
+        let m = text.find("<metadata")?;
+        let end = text[m..].find("</metadata>").map(|e| e + m)?;
+        name_after(m).filter(|_| text[m..].find("<name>").map(|n| n + m) < Some(end))
+    };
+    text.find("<trk>").or_else(|| text.find("<trk ")).and_then(name_after).or_else(in_metadata)
+}
+
 /// Fichiers d’un dossier de côté (corbeille ou doublons) de toutes les bibliothèques.
 fn aside_list(index: &Index, dir_name: &str) -> Result<Vec<crate::model::TrashItem>> {
     let mut out = Vec::new();
@@ -421,7 +446,7 @@ fn aside_list(index: &Index, dir_name: &str) -> Result<Vec<crate::model::TrashIt
             }
             let file = p.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
             let original = original_name(&file);
-            let name = analyze_file(&p).map(|a| a.name).unwrap_or_else(|_| {
+            let name = quick_name(&p).unwrap_or_else(|| {
                 Path::new(&original).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or(original.clone())
             });
             out.push(crate::model::TrashItem {
@@ -466,8 +491,18 @@ pub fn restore_from_trash(index: &mut Index, path: &str, now: i64) -> Result<i64
 /// Compare des fichiers à importer avec l'index, sans rien copier : même fichier
 /// déjà présent (empreinte), ou même parcours probable (critères des Doublons).
 pub fn check_import(index: &Index, files: &[String]) -> Result<Vec<crate::model::ImportCheck>> {
-    use crate::index::{similar_routes, RouteKey};
     let existing = index.list(&crate::model::TraceFilter::default())?;
+    check_import_against(index, files, &existing)
+}
+
+/// Comme [`check_import`], avec la liste des traces déjà chargée : un import en
+/// lot (Komoot, Openrunner) la lit une seule fois au lieu d'une fois par parcours.
+pub fn check_import_against(
+    index: &Index,
+    files: &[String],
+    existing: &[crate::model::TraceSummary],
+) -> Result<Vec<crate::model::ImportCheck>> {
+    use crate::index::{similar_routes, RouteKey};
     let mut out = Vec::new();
     for file in files {
         let path = Path::new(file);
@@ -565,6 +600,28 @@ pub fn pattern_example(pattern: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numerotation_garde_l_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("Seuil.zwo");
+        fs::write(&p, "x").unwrap();
+        assert_eq!(unique(p, &HashSet::new()).file_name().unwrap(), "Seuil (2).zwo");
+    }
+
+    #[test]
+    fn nom_rapide() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("t.gpx");
+        fs::write(
+            &p,
+            "<gpx><metadata><name>Meta</name></metadata><wpt><name>Eau</name></wpt><trk><name>Boucle_du_Vexin 2024</name><trkseg/></trk></gpx>",
+        )
+        .unwrap();
+        assert_eq!(quick_name(&p).as_deref(), Some("Boucle du Vexin"));
+        fs::write(&p, "<gpx><metadata><name>Meta &amp; co</name></metadata><trk><trkseg/></trk></gpx>").unwrap();
+        assert_eq!(quick_name(&p).as_deref(), Some("Meta & co"));
+    }
 
     fn lib(path: &str) -> Library {
         Library {

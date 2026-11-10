@@ -15,10 +15,36 @@ use crate::gpxmeta::read_meta_file;
 use crate::index::Index;
 use crate::model::{Library, ScanReport, TraceAnalysis};
 
+/// Accès à l'index pendant une relecture : un `&mut Index` (tests, outils), ou
+/// un `Mutex<Index>` partagé avec l'interface, verrouillé fichier par fichier.
+pub trait IndexAccess {
+    fn with<R>(&self, f: impl FnOnce(&mut Index) -> Result<R>) -> Result<R>;
+}
+
+impl IndexAccess for std::sync::Mutex<Index> {
+    fn with<R>(&self, f: impl FnOnce(&mut Index) -> Result<R>) -> Result<R> {
+        let mut index = self.lock().map_err(|_| Error::Invalid("Index inutilisable (erreur précédente).".into()))?;
+        f(&mut index)
+    }
+}
+
+impl IndexAccess for std::cell::RefCell<&mut Index> {
+    fn with<R>(&self, f: impl FnOnce(&mut Index) -> Result<R>) -> Result<R> {
+        f(&mut self.borrow_mut())
+    }
+}
+
 /// Indexe tous les `.gpx` d'une bibliothèque. Les fichiers inchangés
 /// (même taille, même date) ne sont pas relus ; ceux qui ont disparu
 /// sortent de l'index.
 pub fn scan_library(index: &mut Index, library: &Library, now: i64) -> Result<ScanReport> {
+    scan_library_shared(&std::cell::RefCell::new(index), library, now)
+}
+
+/// Comme [`scan_library`], mais l'index n'est pris que le temps de chaque
+/// fichier : le parcours du dossier (lent sur un NAS) se fait sans lui, et
+/// l'interface reste utilisable pendant la relecture.
+pub fn scan_library_shared(index: &impl IndexAccess, library: &Library, now: i64) -> Result<ScanReport> {
     // NAS éteint ou débranché : surtout ne rien retirer de l'index (tags, notes,
     // collections seraient perdus). La bibliothèque reste consultable hors ligne.
     if !Path::new(&library.path).is_dir() {
@@ -47,7 +73,7 @@ pub fn scan_library(index: &mut Index, library: &Library, now: i64) -> Result<Sc
             // Entraînement Zwift : indexé à part (onglet Entraînements).
             let key = path.to_string_lossy().to_string();
             seen_workouts.insert(key.clone());
-            if let Err(e) = index_workout(index, library, path, &key, now) {
+            if let Err(e) = index.with(|i| index_workout(i, library, path, &key, now)) {
                 report.errors.push(e.to_string());
             }
             continue;
@@ -57,7 +83,7 @@ pub fn scan_library(index: &mut Index, library: &Library, now: i64) -> Result<Sc
         }
         let key = path.to_string_lossy().to_string();
         seen.insert(key.clone());
-        match index_file(index, library, path, &key, now) {
+        match index.with(|i| index_file(i, library, path, &key, now)) {
             Ok(Outcome::Added) => report.added += 1,
             Ok(Outcome::Updated) => report.updated += 1,
             Ok(Outcome::Unchanged) => report.unchanged += 1,
@@ -68,8 +94,11 @@ pub fn scan_library(index: &mut Index, library: &Library, now: i64) -> Result<Sc
     if walk_failed {
         report.errors.push(format!("{} : lecture incomplète, aucune trace retirée de l’index", library.name));
     } else {
-        report.removed = index.remove_missing(library.id, &seen)?;
-        index.remove_missing_workouts(library.id, &seen_workouts)?;
+        report.removed = index.with(|i| {
+            let n = i.remove_missing(library.id, &seen)?;
+            i.remove_missing_workouts(library.id, &seen_workouts)?;
+            Ok(n)
+        })?;
     }
     Ok(report)
 }

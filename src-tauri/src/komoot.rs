@@ -3,9 +3,9 @@
 //! moment. Le mot de passe sert une seule fois à obtenir un jeton ; seul ce jeton
 //! est gardé, dans le gestionnaire d'identifiants de Windows.
 
+use crate::http::agent;
 use std::io::Read;
 use std::path::Path;
-use std::time::Duration;
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -69,12 +69,6 @@ pub fn logout() -> Result<(), String> {
     }
 }
 
-fn agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(60))
-        .user_agent(concat!("Organisons/", env!("CARGO_PKG_VERSION")))
-        .build()
-}
 
 fn basic(user: &str, password: &str) -> String {
     format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(format!("{user}:{password}")))
@@ -87,7 +81,7 @@ fn http_error(e: ureq::Error) -> String {
         ureq::Error::Status(404, _) => "Komoot ne trouve pas ce parcours (supprimé ou privé ?).".into(),
         ureq::Error::Status(429, _) => "Komoot limite les requêtes : réessaie dans quelques minutes.".into(),
         ureq::Error::Status(code, _) => format!("Komoot a répondu {code} (son API interne a peut-être changé)."),
-        ureq::Error::Transport(t) => format!("Komoot est injoignable (connexion internet ?) : {t}"),
+        ureq::Error::Transport(t) => crate::http::unreachable("Komoot", t),
     }
 }
 

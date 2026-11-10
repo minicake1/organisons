@@ -198,7 +198,7 @@ export default function App() {
           <Group gap={6} px="sm" pt={4}>
             <IconBuildingBroadcastTower size={12} color="#868e96" />
             <Text size="xs" c="dimmed">
-              v0.4{import.meta.env.DEV ? " (dev)" : ""}
+              v0.5.1{import.meta.env.DEV ? " (dev)" : ""}
             </Text>
           </Group>
         </Stack>

@@ -6,6 +6,7 @@
 //! (`http://localhost:<port>`), reçoit le code et l'échange contre un jeton.
 //! Identifiants et jeton sont rangés dans le gestionnaire d'identifiants de Windows.
 
+use crate::http::agent;
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 use std::io::{Read, Write};
@@ -150,12 +151,6 @@ fn now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
-fn agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(60))
-        .user_agent(concat!("Organisons/", env!("CARGO_PKG_VERSION")))
-        .build()
-}
 
 fn enc(s: &str) -> String {
     s.bytes()
@@ -190,11 +185,8 @@ fn http_error(e: ureq::Error) -> String {
     match e {
         ureq::Error::Status(401 | 403, _) => "Hammerhead a refusé l'accès : reconnecte ton compte dans les Réglages.".into(),
         ureq::Error::Status(429, _) => "Hammerhead limite les requêtes : réessaie dans quelques minutes.".into(),
-        ureq::Error::Status(code, r) => {
-            let body = r.into_string().unwrap_or_default();
-            format!("Hammerhead a répondu {code} {}", body.chars().take(200).collect::<String>())
-        }
-        ureq::Error::Transport(t) => format!("Hammerhead est injoignable (connexion internet ?) : {t}"),
+        ureq::Error::Status(code, r) => crate::http::status("Hammerhead", code, r),
+        ureq::Error::Transport(t) => crate::http::unreachable("Hammerhead", t),
     }
 }
 
@@ -239,6 +231,14 @@ pub fn connect(open: impl FnOnce(&str) -> Result<(), String>) -> Result<(), Stri
     let listener = bound
         .map_err(|e| format!("Le port {port} de l'adresse de retour est déjà utilisé ({e}). Ferme le programme qui l'occupe, ou choisis un autre port (ici et sur le Dashboard Hammerhead)."))?;
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+    // « localhost » peut désigner ::1 (IPv6) selon le PC et le navigateur : on écoute
+    // aussi là, si c'est possible, toujours en local seulement.
+    let mut listeners = vec![listener];
+    if let Ok(v6) = TcpListener::bind(("::1", port)) {
+        if v6.set_nonblocking(true).is_ok() {
+            listeners.push(v6);
+        }
+    }
 
     let mut h = RandomState::new().build_hasher();
     h.write_u128(SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
@@ -259,7 +259,12 @@ pub fn connect(open: impl FnOnce(&str) -> Result<(), String>) -> Result<(), Stri
         if Instant::now() > deadline {
             return Err("Pas de réponse de Hammerhead après 5 minutes : connexion abandonnée.".into());
         }
-        match listener.accept() {
+        let accepted = listeners
+            .iter()
+            .map(|l| l.accept())
+            .find(|r| !matches!(r, Err(e) if e.kind() == std::io::ErrorKind::WouldBlock))
+            .unwrap_or_else(|| Err(std::io::ErrorKind::WouldBlock.into()));
+        match accepted {
             Ok((mut stream, _)) => {
                 let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
                 let mut buf = [0u8; 8192];

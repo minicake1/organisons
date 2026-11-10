@@ -120,6 +120,8 @@ export default function LibraryPage({
     [filter],
   )
   const sel = traces.find((t) => t.id === selected) ?? traces[0] ?? null
+  // Sélection limitée aux traces affichées : un filtre change, les traces masquées ne sont plus concernées.
+  const shown = useMemo(() => traces.filter((t) => picked.includes(t.id)), [traces, picked])
 
   const rescan = async () => {
     setBusy(true)
@@ -241,7 +243,7 @@ export default function LibraryPage({
         <Paper withBorder p="xs" radius="md" bg="blue.0" style={{ position: 'sticky', top: 0, zIndex: 5 }}>
           <Group gap="sm">
             <Text size="sm" fw={600}>
-              {picked.length} trace(s) sélectionnée(s)
+              {shown.length} trace(s) sélectionnée(s)
             </Text>
             <Button size="compact-sm" variant="subtle" onClick={() => setPicked(traces.map((t) => t.id))}>
               Tout sélectionner ({traces.length})
@@ -255,12 +257,12 @@ export default function LibraryPage({
                 ml="auto"
                 variant="light"
                 leftSection={<IconDeviceWatch size={14} />}
-                disabled={!picked.length || karooBusy != null}
+                disabled={!shown.length || karooBusy != null}
                 loading={karooBusy != null}
                 onClick={async () => {
                   setKarooBusy("…")
                   try {
-                    const { text, report } = await sendToKaroo(picked, (d, n) => setKarooBusy(`${d} / ${n}`))
+                    const { text, report } = await sendToKaroo(shown.map((t) => t.id), (d, n) => setKarooBusy(`${d} / ${n}`))
                     setNotice(text)
                     if (report.errors.length) setError(report.errors.slice(0, 5).join(" / "))
                   } catch (e) {
@@ -273,7 +275,7 @@ export default function LibraryPage({
                 Envoyer vers le Karoo{karooBusy ? ` (${karooBusy})` : ""}
               </Button>
             )}
-            <Button size="compact-sm" ml={karoo ? undefined : "auto"} leftSection={<IconPencil size={14} />} disabled={!picked.length} onClick={() => setBatchOpen(true)}>
+            <Button size="compact-sm" ml={karoo ? undefined : "auto"} leftSection={<IconPencil size={14} />} disabled={!shown.length} onClick={() => setBatchOpen(true)}>
               Modifier tags, sport, collections…
             </Button>
           </Group>
@@ -281,7 +283,7 @@ export default function LibraryPage({
       )}
       <BatchEditModal
         opened={batchOpen}
-        traces={traces.filter((t) => picked.includes(t.id))}
+        traces={shown}
         onClose={() => setBatchOpen(false)}
         onDone={(message, warnings) => {
           setBatchOpen(false)
@@ -546,7 +548,7 @@ export default function LibraryPage({
                       <Checkbox
                         aria-label="Tout sélectionner"
                         checked={traces.length > 0 && traces.every((t) => picked.includes(t.id))}
-                        indeterminate={picked.length > 0 && !traces.every((t) => picked.includes(t.id))}
+                        indeterminate={shown.length > 0 && !traces.every((t) => picked.includes(t.id))}
                         onChange={(e) => setPicked(e.currentTarget.checked ? traces.map((t) => t.id) : [])}
                       />
                     </Table.Th>

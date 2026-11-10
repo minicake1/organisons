@@ -6,10 +6,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager, State};
 
 mod hammerhead;
+mod http;
 mod komoot;
 mod openrunner;
 mod training;
-use traces_core::scan::{scan_library, write_trace_meta};
+use traces_core::scan::{scan_library_shared, write_trace_meta};
 use traces_core::{
     organize, sport, surface, Collection, DuplicateGroup, DuplicateSet, Index, Library, OrganizeReport, PlannedMove,
     ScanReport, SetAsideInfo, TagCount, TraceDetail, TraceFilter, TraceSummary,
@@ -45,17 +46,28 @@ fn list_libraries(state: State<AppState>) -> CmdResult<Vec<Library>> {
 /// Ajoute un dossier (local ou partage NAS) puis l'indexe.
 #[tauri::command]
 async fn add_library(
-    state: State<'_, AppState>,
+    app: tauri::AppHandle,
     name: String,
     path: String,
     mode: Option<String>,
     write_gpx: Option<bool>,
 ) -> CmdResult<ScanReport> {
-    let mut index = state.index.lock().map_err(err)?;
-    let mode = mode.as_deref().unwrap_or("index");
+    let mode = mode.as_deref().unwrap_or("index").to_string();
     let write_gpx = write_gpx.unwrap_or(mode == "managed");
-    let lib = index.add_library(&name, &path, mode, "{sport}/{annee}/{nom}.gpx", write_gpx).map_err(err)?;
-    scan_library(&mut index, &lib, now()).map_err(err)
+    let lib = app
+        .state::<AppState>()
+        .index
+        .lock()
+        .map_err(err)?
+        .add_library(&name, &path, &mode, "{sport}/{annee}/{nom}.gpx", write_gpx)
+        .map_err(err)?;
+    blocking(move || scan_library_shared(&app.state::<AppState>().index, &lib, now()).map_err(err)).await
+}
+
+/// Exécute un travail long (fichiers, NAS, réseau) hors du fil principal, pour
+/// que la fenêtre ne se fige pas.
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> CmdResult<T> + Send + 'static) -> CmdResult<T> {
+    tauri::async_runtime::spawn_blocking(f).await.map_err(err)?
 }
 
 #[tauri::command]
@@ -70,15 +82,20 @@ fn set_library_write_gpx(state: State<AppState>, id: i64, write_gpx: bool) -> Cm
 
 /// Relit toutes les bibliothèques (seuls les fichiers modifiés sont réanalysés).
 #[tauri::command]
-async fn scan_all(state: State<'_, AppState>) -> CmdResult<ScanReport> {
-    let mut index = state.index.lock().map_err(err)?;
+async fn scan_all(app: tauri::AppHandle) -> CmdResult<ScanReport> {
+    blocking(move || scan_all_blocking(&app.state::<AppState>().index)).await
+}
+
+/// Relecture : l'index n'est verrouillé que fichier par fichier.
+fn scan_all_blocking(index: &Mutex<Index>) -> CmdResult<ScanReport> {
+    let libraries = index.lock().map_err(err)?.libraries().map_err(err)?;
     let mut total = ScanReport::default();
-    for lib in index.libraries().map_err(err)? {
+    for lib in libraries {
         if !std::path::Path::new(&lib.path).exists() {
             total.errors.push(format!("{} : dossier injoignable ({})", lib.name, lib.path));
             continue;
         }
-        let r = match scan_library(&mut index, &lib, now()) {
+        let r = match scan_library_shared(index, &lib, now()) {
             Ok(r) => r,
             Err(e) => {
                 total.errors.push(e.to_string());
@@ -91,7 +108,7 @@ async fn scan_all(state: State<'_, AppState>) -> CmdResult<ScanReport> {
         total.removed += r.removed;
         total.errors.extend(r.errors);
     }
-    auto_purge(&index);
+    auto_purge(&*index.lock().map_err(err)?);
     Ok(total)
 }
 
@@ -105,18 +122,27 @@ fn get_trace(state: State<AppState>, id: i64) -> CmdResult<TraceDetail> {
     state.index.lock().map_err(err)?.get(id).map_err(err)
 }
 
+/// Tags et notes : le GPX est réécrit (parfois sur le NAS), donc hors du fil principal.
 #[tauri::command]
-fn set_tags(state: State<AppState>, id: i64, tags: Vec<String>) -> CmdResult<()> {
-    let mut index = state.index.lock().map_err(err)?;
-    index.set_tags(id, &tags).map_err(err)?;
-    sync_gpx(&index, id)
+async fn set_tags(app: tauri::AppHandle, id: i64, tags: Vec<String>) -> CmdResult<()> {
+    blocking(move || {
+        let state = app.state::<AppState>();
+        let mut index = state.index.lock().map_err(err)?;
+        index.set_tags(id, &tags).map_err(err)?;
+        sync_gpx(&index, id)
+    })
+    .await
 }
 
 #[tauri::command]
-fn set_notes(state: State<AppState>, id: i64, notes: String) -> CmdResult<()> {
-    let index = state.index.lock().map_err(err)?;
-    index.set_notes(id, &notes).map_err(err)?;
-    sync_gpx(&index, id)
+async fn set_notes(app: tauri::AppHandle, id: i64, notes: String) -> CmdResult<()> {
+    blocking(move || {
+        let state = app.state::<AppState>();
+        let index = state.index.lock().map_err(err)?;
+        index.set_notes(id, &notes).map_err(err)?;
+        sync_gpx(&index, id)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -177,10 +203,14 @@ fn set_tag_keywords(state: State<AppState>, tag: String, keywords: Vec<String>) 
 /// Modifie plusieurs traces (tags, sport, collections). Renvoie les erreurs
 /// d’écriture dans les GPX (l’index, lui, est à jour).
 #[tauri::command]
-fn batch_edit(state: State<AppState>, ids: Vec<i64>, edit: traces_core::BatchEdit) -> CmdResult<Vec<String>> {
-    let mut index = state.index.lock().map_err(err)?;
-    let changed = index.batch_edit(&ids, &edit, now()).map_err(err)?;
-    Ok(changed.into_iter().filter_map(|id| sync_gpx(&index, id).err()).collect())
+async fn batch_edit(app: tauri::AppHandle, ids: Vec<i64>, edit: traces_core::BatchEdit) -> CmdResult<Vec<String>> {
+    blocking(move || {
+        let state = app.state::<AppState>();
+        let changed = state.index.lock().map_err(err)?.batch_edit(&ids, &edit, now()).map_err(err)?;
+        // Un fichier à la fois : l'interface peut lire l'index entre deux écritures.
+        Ok(changed.into_iter().filter_map(|id| state.index.lock().map_err(err).and_then(|i| sync_gpx(&i, id)).err()).collect())
+    })
+    .await
 }
 
 /// Compte Komoot connecté (sans le jeton), ou rien.
@@ -238,7 +268,11 @@ async fn komoot_import(app: tauri::AppHandle, library_id: i64, ids: Vec<String>)
     let dir = app.path().app_cache_dir().map_err(err)?.join("komoot");
     std::fs::create_dir_all(&dir).map_err(err)?;
     tauri::async_runtime::spawn_blocking(move || -> CmdResult<OrganizeReport> {
-        let lib = app.state::<AppState>().index.lock().map_err(err)?.library(library_id).map_err(err)?;
+        let (lib, mut existing) = {
+            let state = app.state::<AppState>();
+            let index = state.index.lock().map_err(err)?;
+            (index.library(library_id).map_err(err)?, index.list(&TraceFilter::default()).map_err(err)?)
+        };
         let total = ids.len();
         let mut report = OrganizeReport::default();
         let _ = app.emit("komoot-progress", KomootProgress { phase: "import", done: 0, total });
@@ -249,7 +283,7 @@ async fn komoot_import(app: tauri::AppHandle, library_id: i64, ids: Vec<String>)
                 Ok(()) => {
                     let state = app.state::<AppState>();
                     let mut index = state.index.lock().map_err(err)?;
-                    import_one(&mut index, &lib, &path, "komoot", id, &mut report)?;
+                    import_one(&mut index, &lib, &path, "komoot", id, &mut existing, &mut report)?;
                 }
             }
             let _ = app.emit("komoot-progress", KomootProgress { phase: "import", done: n + 1, total });
@@ -270,10 +304,11 @@ fn import_one(
     path: &std::path::Path,
     source: &str,
     external_id: &str,
+    existing: &mut Vec<TraceSummary>,
     report: &mut OrganizeReport,
 ) -> CmdResult<()> {
     let file = path.to_string_lossy().to_string();
-    let check = organize::check_import(index, std::slice::from_ref(&file)).map_err(err)?.into_iter().next();
+    let check = organize::check_import_against(index, std::slice::from_ref(&file), existing).map_err(err)?.into_iter().next();
     match check {
         Some(c) if c.status == "identical" || c.status == "probable" => {
             report.skipped.push(format!("{} : déjà présent ({})", c.name, c.matches.join(", ")));
@@ -282,8 +317,10 @@ fn import_one(
         _ => {
             let one = organize::import_files(index, lib, &[file], now()).map_err(err)?;
             if let Some(&trace) = one.imported_ids.first() {
-                let saved = index.get(trace).map_err(err)?.summary.path;
-                index.mark_external_import(source, external_id, &saved, now()).map_err(err)?;
+                let saved = index.get(trace).map_err(err)?.summary;
+                index.mark_external_import(source, external_id, &saved.path, now()).map_err(err)?;
+                // Un même parcours deux fois dans le lot : le second est reconnu.
+                existing.push(saved);
             }
             report.imported += one.imported;
             report.imported_ids.extend(one.imported_ids);
@@ -301,10 +338,14 @@ async fn openrunner_import(app: tauri::AppHandle, library_id: i64, links: Vec<St
     let dir = app.path().app_cache_dir().map_err(err)?.join("openrunner");
     std::fs::create_dir_all(&dir).map_err(err)?;
     tauri::async_runtime::spawn_blocking(move || -> CmdResult<OrganizeReport> {
-        let (lib, done) = {
+        let (lib, done, mut existing) = {
             let state = app.state::<AppState>();
             let index = state.index.lock().map_err(err)?;
-            (index.library(library_id).map_err(err)?, index.external_imports("openrunner").map_err(err)?)
+            (
+                index.library(library_id).map_err(err)?,
+                index.external_imports("openrunner").map_err(err)?,
+                index.list(&TraceFilter::default()).map_err(err)?,
+            )
         };
         let links: Vec<&String> = links.iter().filter(|l| !l.trim().is_empty()).collect();
         let total = links.len();
@@ -326,7 +367,7 @@ async fn openrunner_import(app: tauri::AppHandle, library_id: i64, links: Vec<St
             }
             let state = app.state::<AppState>();
             let mut index = state.index.lock().map_err(err)?;
-            import_one(&mut index, &lib, &path, "openrunner", &id, &mut report)?;
+            import_one(&mut index, &lib, &path, "openrunner", &id, &mut existing, &mut report)?;
         }
         let _ = app.emit("openrunner-progress", KomootProgress { phase: "import", done: total, total });
         Ok(report)

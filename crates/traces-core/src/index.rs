@@ -8,7 +8,7 @@ use crate::error::{Error, Result};
 use crate::model::*;
 
 /// Version des règles d’analyse : la changer fait relire tous les fichiers une fois.
-const ANALYSIS_VERSION: &str = "6";
+const ANALYSIS_VERSION: &str = "7";
 
 const SCHEMA: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -1403,11 +1403,16 @@ impl Index {
 
     /// Tous les entraînements, les plus récemment ajoutés d'abord.
     pub fn workouts(&self) -> Result<Vec<WorkoutSummary>> {
-        let mut st = self.conn.prepare(
+        self.query_workouts("", [])
+    }
+
+    /// Entraînements, filtrés par une clause SQL (`WHERE …`) facultative.
+    fn query_workouts(&self, filter: &str, args: impl rusqlite::Params) -> Result<Vec<WorkoutSummary>> {
+        let mut st = self.conn.prepare(&format!(
             "SELECT id, library_id, path, name, author, description, sport, tags_json, duration, intensity, tss,
-                    blocks_json, added_at FROM workouts ORDER BY added_at DESC, name COLLATE NATUREL",
-        )?;
-        let rows = st.query_map([], |r| {
+                    blocks_json, added_at FROM workouts {filter} ORDER BY added_at DESC, name COLLATE NATUREL"
+        ))?;
+        let rows = st.query_map(args, |r| {
             Ok((
                 r.get::<_, i64>(0)?,
                 r.get::<_, i64>(1)?,
@@ -1449,7 +1454,7 @@ impl Index {
     }
 
     pub fn workout(&self, id: i64) -> Result<WorkoutSummary> {
-        self.workouts()?.into_iter().find(|w| w.id == id).ok_or_else(|| Error::NotFound(format!("entraînement {id}")))
+        self.query_workouts("WHERE id = ?1", [id])?.into_iter().next().ok_or_else(|| Error::NotFound(format!("entraînement {id}")))
     }
 }
 
