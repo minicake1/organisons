@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@mantine/core": "^7.17.0",
-    "@mantine/hooks": "^7.17.0",
+    "@mantine/hooks": "^9.7.5",
     "@mapbox/vector-tile": "^2.0.3",
     "@tabler/icons-react": "^3.31.0",
     "@tauri-apps/api": "^2.0.0",
