@@ -9,7 +9,7 @@ description = "Lecture, analyse et indexation de fichiers GPX (cœur d'Organison
 gpx = "0.10"
 geo-types = "0.7"
 time = "0.3"
-rusqlite = { version = "0.32", features = ["bundled", "collation"] }
+rusqlite = { version = "0.41", features = ["bundled", "collation"] }
 walkdir = "2"
 sha2 = "0.10"
 serde.workspace = true
