@@ -23,6 +23,7 @@ import { api, type Library, type ScanReport } from '../api'
 import ManagedActions, { type ActionResult } from '../components/ManagedActions'
 import PatternEditor from '../components/PatternEditor'
 import CreditsPanel from '../components/CreditsPanel'
+import { UpdateCheck } from '../components/UpdatePanel'
 import BackupPanel from '../components/BackupPanel'
 
 export default function SettingsPage() {
@@ -218,6 +219,10 @@ export default function SettingsPage() {
 
       <Title order={2} mt="md">Sauvegarde de la configuration</Title>
       <BackupPanel />
+      <Title order={2} mt="md">Mises à jour</Title>
+      <Paper withBorder radius="md" p="md">
+        <UpdateCheck />
+      </Paper>
       <Title order={2} mt="md">À propos et crédits</Title>
       <CreditsPanel />
     </Stack>

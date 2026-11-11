@@ -17,6 +17,10 @@ traces-core = { path = "../crates/traces-core" }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
+# Mises à jour : paquet de la dernière Release GitHub, vérifié par la clé publique
+# de tauri.conf.json, puis redémarrage.
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 serde.workspace = true
 serde_json.workspace = true
 # Komoot (API interne, non officielle) : requêtes HTTP et jeton rangé dans le

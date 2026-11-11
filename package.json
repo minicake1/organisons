@@ -2,7 +2,7 @@
   "name": "organisons",
   "private": true,
   "license": "AGPL-3.0-or-later",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -19,6 +19,8 @@
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
     "@tauri-apps/plugin-opener": "^2.0.0",
+    "@tauri-apps/plugin-process": "^2.4.0",
+    "@tauri-apps/plugin-updater": "^2.14.1",
     "maplibre-gl": "^6.16.0",
     "pbf": "^4.0.1",
     "react": "^18.3.1",

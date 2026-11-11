@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react'
 import * as maplibregl from 'maplibre-gl'
 import type { Poi, ProfilePoint } from '../api'
-import { int, km1, niceStep, poiKind } from '../labels'
+import { int, km1, niceStep } from '../labels'
+import { poiMarker, poiTip } from './PoiCategory'
 import { boundsOf, line, setGeoJson, useMapLibre } from './useMapLibre'
 
 interface Props {
@@ -14,6 +15,8 @@ interface Props {
   onView?: (range: [number, number] | null) => void
   /** Partie de la trace entourée d’un léger halo lumineux (étape survolée d’un tour), en [lon, lat]. */
   glow?: [number, number][] | null
+  /** Mode « placer un point » : curseur en croix, un clic donne la position. */
+  onPick?: (lat: number, lon: number) => void
 }
 
 const ll = (p: ProfilePoint) => [p.lon, p.lat] as [number, number]
@@ -21,7 +24,7 @@ const ll = (p: ProfilePoint) => [p.lon, p.lat] as [number, number]
 /** En dessous de ce zoom, les noms des POI se chevauchent : on n'affiche que les pastilles. */
 const POI_LABEL_MIN_ZOOM = 11
 
-export default function TraceMap({ profile, pois, cursor, colors, onView, glow }: Props) {
+export default function TraceMap({ profile, pois, cursor, colors, onView, glow, onPick }: Props) {
   const { container, map, fitTo } = useMapLibre()
   const markers = useRef<maplibregl.Marker[]>([])
   const poiMarkers = useRef<maplibregl.Marker[]>([])
@@ -74,50 +77,12 @@ export default function TraceMap({ profile, pois, cursor, colors, onView, glow }
     markers.current.push(new maplibregl.Marker({ element: start }).setLngLat(ll(profile[0])).addTo(map))
   }, [map, profile, colors, total])
 
-  // Points d'intérêt affichés, avec une info-bulle colorée au survol.
+  // Points d'intérêt affichés, avec une info-bulle colorée au survol (repères communs : PoiCategory).
   useEffect(() => {
     if (!map) return
     poiMarkers.current.forEach((m) => m.remove())
-    const tip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, className: 'poi-tip', offset: 14, maxWidth: '260px' })
-    const showTip = (p: Poi, color: string, label: string, above: number) => {
-      const box = document.createElement('div')
-      const name = document.createElement('div')
-      name.className = 'poi-tip-name'
-      name.textContent = p.name || '(sans nom)'
-      const meta = document.createElement('div')
-      meta.className = 'poi-tip-meta'
-      meta.textContent = `${label} · km ${km1(p.km)}`
-      box.append(name, meta)
-      tip.setOffset(above).setLngLat([p.lon, p.lat]).setDOMContent(box).addTo(map)
-      tip.getElement()?.style.setProperty('--poi-color', color)
-    }
-    poiMarkers.current = pois.map((p) => {
-      const k = poiKind(p.kind)
-      const el = document.createElement('div')
-      let marker: maplibregl.Marker
-      let target: HTMLElement = el
-      if (k.big) {
-        el.className = 'poi-big'
-        const label = document.createElement('span')
-        label.className = 'label'
-        label.style.background = k.color
-        label.textContent = p.name
-        const pin = document.createElement('span')
-        pin.className = 'pin'
-        pin.style.background = k.color
-        pin.textContent = p.kind === 'control' ? '✓' : '!'
-        el.append(label, pin)
-        target = pin
-        marker = new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([p.lon, p.lat])
-      } else {
-        el.className = 'poi-small'
-        el.style.background = k.color
-        marker = new maplibregl.Marker({ element: el }).setLngLat([p.lon, p.lat])
-      }
-      target.addEventListener('mouseenter', () => showTip(p, k.color, k.label, k.big ? 30 : 12))
-      target.addEventListener('mouseleave', () => tip.remove())
-      return marker.addTo(map)
-    })
+    const tip = poiTip()
+    poiMarkers.current = pois.map((p) => poiMarker(map, tip, p, `km ${km1(p.km)}`))
     return () => {
       tip.remove()
     }
@@ -164,6 +129,19 @@ export default function TraceMap({ profile, pois, cursor, colors, onView, glow }
       map.off('moveend', update)
     }
   }, [map, profile, total, onView])
+
+  // Placer un point : clic sur la carte.
+  useEffect(() => {
+    if (!map || !onPick) return
+    const canvas = map.getCanvas()
+    canvas.style.cursor = 'crosshair'
+    const click = (e: maplibregl.MapMouseEvent) => onPick(e.lngLat.lat, e.lngLat.lng)
+    map.on('click', click)
+    return () => {
+      canvas.style.cursor = ''
+      map.off('click', click)
+    }
+  }, [map, onPick])
 
   // Halo lumineux sous la partie survolée (étape d’un tour).
   useEffect(() => {

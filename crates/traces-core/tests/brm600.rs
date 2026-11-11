@@ -716,7 +716,7 @@ fn doublons_mis_de_cote_restaures() {
 
 #[test]
 fn gpx_pour_le_karoo() {
-    let bytes = device::hammerhead_gpx(&fixture()).unwrap();
+    let bytes = device::hammerhead_gpx(&fixture(), &Default::default()).unwrap();
     let g = gpx::read(std::io::Cursor::new(&bytes)).unwrap();
     assert_eq!(g.waypoints.len(), 182, "points d'intérêt gardés");
     let allowed = ["Food", "Water", "Parking", "Camping", "Lodging", "Geocache", "Summit", "Generic", "Danger"];
@@ -761,4 +761,141 @@ fn entrainements_zwo() {
     std::fs::remove_file(root.join("seuil.zwo")).unwrap();
     scan_library(&mut idx, &lib, 3_000).unwrap();
     assert_eq!(idx.workouts().unwrap().len(), 1);
+}
+
+#[test]
+fn categorie_choisie_pour_un_poi() {
+    use traces_core::model::PoiKind;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("NAS");
+    std::fs::create_dir_all(&root).unwrap();
+    let file = root.join("a.gpx");
+    std::fs::copy(fixture(), &file).unwrap();
+    let mut idx = Index::open_in_memory().unwrap();
+    let lib = idx.add_library("NAS", &root.to_string_lossy(), "indexed", "", false).unwrap();
+    scan_library(&mut idx, &lib, 1_000).unwrap();
+    let id = idx.trace_id_by_path(&file.to_string_lossy()).unwrap().unwrap();
+    let (i, poi) = idx.get(id).unwrap().pois.into_iter().enumerate().find(|(_, p)| p.kind != PoiKind::Lodging).unwrap();
+    idx.set_poi_kind(id, i as i64, Some(PoiKind::Lodging)).unwrap();
+    let chosen = |idx: &Index| idx.get(id).unwrap().pois.into_iter().find(|p| p.lat == poi.lat && p.lon == poi.lon).unwrap();
+    assert_eq!((chosen(&idx).kind, chosen(&idx).kind_user), (PoiKind::Lodging, true));
+
+    // Fichier modifié puis relu : les POI sont réinsérés, la catégorie choisie revient.
+    let xml = std::fs::read_to_string(&file).unwrap().replacen("<gpx", "<!-- modifié -->\n<gpx", 1);
+    std::fs::write(&file, xml).unwrap();
+    scan_library(&mut idx, &lib, 2_000).unwrap();
+    assert_eq!(chosen(&idx).kind, PoiKind::Lodging, "gardée à la relecture");
+
+    // Envoi au Karoo : type Lodging.
+    let bytes = device::hammerhead_gpx(&file, &idx.poi_kinds(id).unwrap()).unwrap();
+    let g = gpx::read(std::io::Cursor::new(&bytes)).unwrap();
+    let w = g.waypoints.iter().find(|w| w.point().y() == poi.lat && w.point().x() == poi.lon).unwrap();
+    assert_eq!(w.type_.as_deref(), Some("Lodging"));
+
+    // Sauvegarde puis index neuf.
+    let saved = backup::export(&idx, "0.8.0", Default::default(), 3_000).unwrap();
+    let mut fresh = Index::open_in_memory().unwrap();
+    for l in &backup::restore_libraries(&fresh, &saved).unwrap() {
+        scan_library(&mut fresh, l, 4_000).unwrap();
+    }
+    backup::restore_data(&fresh, &saved).unwrap();
+    let id2 = fresh.trace_id_by_path(&file.to_string_lossy()).unwrap().unwrap();
+    let p2 = fresh.get(id2).unwrap().pois.into_iter().find(|p| p.lat == poi.lat && p.lon == poi.lon).unwrap();
+    assert_eq!((p2.kind, p2.kind_user), (PoiKind::Lodging, true), "gardée dans la sauvegarde");
+
+    // Retour à la catégorie détectée.
+    idx.set_poi_kind(id, i as i64, None).unwrap();
+    assert_eq!((chosen(&idx).kind, chosen(&idx).kind_user), (poi.kind, false));
+}
+
+#[test]
+fn modifier_les_poi_dans_le_gpx() {
+    use traces_core::gpxmeta::WptEdit;
+    use traces_core::model::PoiKind;
+    use traces_core::organize::{edit_pois, PoiEdit};
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("NAS");
+    std::fs::create_dir_all(&root).unwrap();
+    let file = root.join("a.gpx");
+    std::fs::copy(fixture(), &file).unwrap();
+    let mut idx = Index::open_in_memory().unwrap();
+    let lib = idx.add_library("NAS", &root.to_string_lossy(), "indexed", "", true).unwrap();
+    scan_library(&mut idx, &lib, 1_000).unwrap();
+    let id = idx.trace_id_by_path(&file.to_string_lossy()).unwrap().unwrap();
+    idx.set_tags(id, &["BRM".into()]).unwrap();
+    let pois = idx.get(id).unwrap().pois;
+    assert_eq!(pois.len(), 182);
+    let (a, b, c) = (pois[0].clone(), pois[1].clone(), pois[2].clone());
+    let e = |edit: WptEdit| PoiEdit { edit, kind: None };
+    // Catégorie choisie sur « b » : elle doit suivre le renommage et le déplacement.
+    let ib = 1;
+    idx.set_poi_kind(id, ib, Some(PoiKind::Lodging)).unwrap();
+    let start = idx.get(id).unwrap().profile[100].clone();
+    let edits = vec![
+        PoiEdit { edit: WptEdit::Add { lat: start.lat, lon: start.lon, name: "Boulangerie & café".into() }, kind: Some(PoiKind::Shop) },
+        e(WptEdit::Rename { lat: b.lat, lon: b.lon, name: b.name.clone(), new_name: "Gîte du col".into() }),
+        e(WptEdit::Move { lat: b.lat, lon: b.lon, name: "Gîte du col".into(), to_lat: b.lat + 0.001, to_lon: b.lon }),
+        e(WptEdit::Delete { lat: a.lat, lon: a.lon, name: a.name.clone() }),
+    ];
+    edit_pois(&mut idx, id, &edits, 2_000).unwrap();
+
+    let t = idx.get(id).unwrap();
+    assert_eq!(t.pois.len(), 182, "un ajouté, un supprimé");
+    assert!(!t.pois.iter().any(|p| p.lat == a.lat && p.lon == a.lon && p.name == a.name), "supprimé");
+    let added = t.pois.iter().find(|p| p.name == "Boulangerie & café").expect("ajouté, nom échappé puis relu");
+    assert_eq!((added.kind, added.kind_user), (PoiKind::Shop, true));
+    let moved = t.pois.iter().find(|p| p.name == "Gîte du col").expect("renommé");
+    assert!((moved.lat - (b.lat + 0.001)).abs() < 1e-6 && moved.lon == b.lon, "déplacé");
+    assert_eq!((moved.kind, moved.kind_user), (PoiKind::Lodging, true), "la catégorie choisie suit le POI");
+    assert!(t.pois.iter().any(|p| p.name == c.name && p.lat == c.lat), "les autres POI gardés");
+    assert_eq!(t.summary.tags, vec!["BRM".to_string()], "tags gardés");
+    // Le reste du fichier est intact : même trace.
+    let g = gpx::read(std::fs::File::open(&file).unwrap()).unwrap();
+    assert_eq!(g.tracks.iter().flat_map(|t| &t.segments).map(|s| s.points.len()).sum::<usize>(), 14322);
+    assert_eq!(g.waypoints.len(), 182);
+
+    // POI introuvable (fichier modifié ailleurs) : erreur, fichier intact.
+    let before = std::fs::read(&file).unwrap();
+    let err = edit_pois(&mut idx, id, &[e(WptEdit::Delete { lat: 1.0, lon: 1.0, name: "x".into() })], 3_000).unwrap_err();
+    assert!(err.to_string().contains("introuvable"));
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+
+    // Bibliothèque sans écriture : refusé.
+    let ro = idx.add_library("RO", &dir.path().join("RO").to_string_lossy(), "indexed", "", false).unwrap();
+    std::fs::create_dir_all(dir.path().join("RO")).unwrap();
+    std::fs::copy(fixture(), dir.path().join("RO").join("b.gpx")).unwrap();
+    scan_library(&mut idx, &ro, 4_000).unwrap();
+    let rid = idx.trace_id_by_path(&dir.path().join("RO").join("b.gpx").to_string_lossy()).unwrap().unwrap();
+    assert!(edit_pois(&mut idx, rid, &[e(WptEdit::Add { lat: 49.0, lon: -1.0, name: "x".into() })], 5_000).is_err());
+}
+
+#[test]
+fn vue_d_ensemble_des_poi() {
+    use traces_core::model::PoiKind;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("NAS");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::copy(fixture(), root.join("a.gpx")).unwrap();
+    // Deux traces avec les mêmes POI (fichiers différents) : un lieu, deux traces.
+    let b_xml = std::fs::read_to_string(fixture()).unwrap().replacen("<gpx", "<!-- b -->\n<gpx", 1);
+    std::fs::write(root.join("b.gpx"), b_xml).unwrap();
+    let mut idx = Index::open_in_memory().unwrap();
+    let lib = idx.add_library("NAS", &root.to_string_lossy(), "indexed", "", false).unwrap();
+    scan_library(&mut idx, &lib, 1_000).unwrap();
+    let a = idx.trace_id_by_path(&root.join("a.gpx").to_string_lossy()).unwrap().unwrap();
+    let places = idx.poi_places().unwrap();
+    let pois = idx.get(a).unwrap().pois;
+    assert!(places.len() <= pois.len(), "les POI des deux traces regroupés");
+    assert!(places.iter().all(|p| p.traces.len() == 2 || p.traces.iter().map(|t| t.trace_id).collect::<std::collections::HashSet<_>>().len() == p.traces.len()));
+    let first = &pois[0];
+    let place = places.iter().find(|p| p.traces.iter().any(|t| t.trace_id == a && t.name == first.name)).unwrap();
+    assert_eq!(place.traces.len(), 2);
+    // La catégorie choisie compte.
+    idx.set_poi_kind(a, 0, Some(PoiKind::Lodging)).unwrap();
+    let b = idx.trace_id_by_path(&root.join("b.gpx").to_string_lossy()).unwrap().unwrap();
+    let ib = idx.get(b).unwrap().pois.iter().position(|p| p.lat == first.lat && p.lon == first.lon).unwrap();
+    idx.set_poi_kind(b, ib as i64, Some(PoiKind::Lodging)).unwrap();
+    let places = idx.poi_places().unwrap();
+    let place = places.iter().find(|p| p.traces.iter().any(|t| t.trace_id == a && t.name == first.name)).unwrap();
+    assert_eq!(place.kind, PoiKind::Lodging);
 }

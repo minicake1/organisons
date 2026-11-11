@@ -154,6 +154,11 @@ pub fn write_name_file(path: &Path, name: &str) -> Result<bool> {
 /// Réécrit un GPX par une modification textuelle, vérifiée : UTF-8, relecture
 /// possible, même nombre de points ; fichier temporaire puis renommage.
 fn rewrite(path: &Path, change: impl FnOnce(&str) -> std::result::Result<String, String>) -> Result<bool> {
+    rewrite_counted(path, 0, change)
+}
+
+/// Comme `rewrite`, avec `delta` points d'intérêt de plus (ajouts) ou de moins (suppressions).
+fn rewrite_counted(path: &Path, delta: i64, change: impl FnOnce(&str) -> std::result::Result<String, String>) -> Result<bool> {
     let io = |source| Error::Io { path: path.to_owned(), source };
     let fail = |message: String| Error::Gpx { path: path.to_owned(), message };
     let bytes = fs::read(path).map_err(io)?;
@@ -171,8 +176,8 @@ fn rewrite(path: &Path, change: impl FnOnce(&str) -> std::result::Result<String,
     };
     let before = count(&xml).map_err(fail)?;
     let after = count(&new).map_err(|e| fail(format!("le GPX modifié ne se relit pas ({e}), fichier laissé intact")))?;
-    if before != after {
-        return Err(fail("le GPX modifié n'a plus le même nombre de points, fichier laissé intact".into()));
+    if before as i64 + delta != after as i64 {
+        return Err(fail("le GPX modifié n'a pas le nombre de points attendu, fichier laissé intact".into()));
     }
     let file_name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     let tmp = path.with_file_name(format!(".{file_name}.organisons.tmp"));
@@ -206,6 +211,190 @@ fn unescape(s: &str) -> String {
         .replace("&quot;", "\"")
         .replace("&apos;", "'")
         .replace("&amp;", "&")
+}
+
+// ---------------------------------------------------------------------------
+// Points d'intérêt (`<wpt>`) : modifiés dans le texte du GPX, le reste du
+// fichier gardé tel quel. Un POI est désigné par sa position et son nom
+// (`index::poi_key`), comme dans l'index.
+
+/// Modification d'un point d'intérêt. `lat`, `lon`, `name` : le POI tel qu'il
+/// est dans le fichier (pour `Add` : le nouveau POI).
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[serde(tag = "op", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum WptEdit {
+    Add { lat: f64, lon: f64, name: String },
+    Rename { lat: f64, lon: f64, name: String, new_name: String },
+    Move { lat: f64, lon: f64, name: String, to_lat: f64, to_lon: f64 },
+    Delete { lat: f64, lon: f64, name: String },
+}
+
+struct WptSpan {
+    start: usize,
+    /// Fin de la balise ouvrante (après `>`).
+    open_end: usize,
+    end: usize,
+    self_closing: bool,
+    lat: f64,
+    lon: f64,
+    name: String,
+    /// Contenu de `<name>` (début, fin), s'il existe.
+    name_span: Option<(usize, usize)>,
+}
+
+/// Position de la valeur de l'attribut `key` dans une balise ouvrante.
+fn attr(tag: &str, key: &str) -> Option<(usize, usize)> {
+    let mut from = 0;
+    while let Some(i) = tag[from..].find(key).map(|i| i + from) {
+        let before_ok = i > 0 && tag.as_bytes()[i - 1].is_ascii_whitespace();
+        let rest = tag[i + key.len()..].trim_start();
+        if before_ok && rest.starts_with('=') {
+            let after_eq = rest[1..].trim_start();
+            let q = after_eq.chars().next()?;
+            if q == '"' || q == '\'' {
+                let vstart = tag.len() - after_eq.len() + 1;
+                let vend = vstart + tag[vstart..].find(q)?;
+                return Some((vstart, vend));
+            }
+        }
+        from = i + key.len();
+    }
+    None
+}
+
+fn wpt_spans(xml: &str) -> Vec<WptSpan> {
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(start) = xml[from..].find("<wpt").map(|i| i + from) {
+        let next = xml.as_bytes().get(start + 4).copied().unwrap_or(b'>');
+        if !(next == b'>' || next.is_ascii_whitespace() || next == b'/') {
+            from = start + 4;
+            continue;
+        }
+        let Some(gt) = xml[start..].find('>').map(|i| i + start) else { break };
+        let open_end = gt + 1;
+        let tag = &xml[start..open_end];
+        let self_closing = xml[..gt].ends_with('/');
+        let end = if self_closing {
+            open_end
+        } else {
+            match xml[open_end..].find("</wpt>") {
+                Some(i) => open_end + i + "</wpt>".len(),
+                None => break,
+            }
+        };
+        let num = |k: &str| attr(tag, k).and_then(|(a, b)| tag[a..b].trim().parse::<f64>().ok());
+        if let (Some(lat), Some(lon)) = (num("lat"), num("lon")) {
+            let inner = if self_closing { "" } else { &xml[open_end..end - "</wpt>".len()] };
+            let name_span = inner.find("<name>").and_then(|a| {
+                let a = a + "<name>".len();
+                inner[a..].find("</name>").map(|b| (open_end + a, open_end + a + b))
+            });
+            let name = name_span.map(|(a, b)| {
+                let raw = xml[a..b].trim();
+                let raw = match raw.strip_prefix("<![CDATA[").and_then(|r| r.strip_suffix("]]>")) {
+                    Some(r) => r.to_string(),
+                    None => unescape(raw),
+                };
+                raw.trim().to_string()
+            });
+            out.push(WptSpan { start, open_end, end, self_closing, lat, lon, name: name.unwrap_or_default(), name_span });
+        }
+        from = end;
+    }
+    out
+}
+
+fn coord(x: f64) -> String {
+    let s = format!("{x:.7}");
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+fn find_wpt(xml: &str, lat: f64, lon: f64, name: &str) -> std::result::Result<WptSpan, String> {
+    let key = crate::index::poi_key(lat, lon, name.trim());
+    wpt_spans(xml)
+        .into_iter()
+        .find(|w| crate::index::poi_key(w.lat, w.lon, &w.name) == key)
+        .ok_or_else(|| format!("point d'intérêt « {name} » introuvable dans le fichier (modifié ailleurs ? relis les dossiers)"))
+}
+
+/// Indentation de la ligne où commence `at`.
+fn indent_at(xml: &str, at: usize) -> &str {
+    let line = xml[..at].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let ws = &xml[line..at];
+    if ws.chars().all(|c| c == ' ' || c == '\t') {
+        ws
+    } else {
+        ""
+    }
+}
+
+/// Applique une modification de POI au texte d'un GPX.
+pub fn with_wpt_edit(xml: &str, edit: &WptEdit) -> std::result::Result<String, String> {
+    let name_tag = |n: &str| format!("<name>{}</name>", escape(n.trim()));
+    match edit {
+        WptEdit::Add { lat, lon, name } => {
+            let element = format!("<wpt lat=\"{}\" lon=\"{}\">{}</wpt>", coord(*lat), coord(*lon), name_tag(name));
+            // GPX 1.1 : les <wpt> avant <rte> et <trk> ; à la suite des autres s'il y en a.
+            if let Some(last) = wpt_spans(xml).last() {
+                let indent = indent_at(xml, last.start);
+                return Ok(format!("{}\n{indent}{element}{}", &xml[..last.end], &xml[last.end..]));
+            }
+            let anchor = ["<rte>", "<rte ", "<trk>", "<trk ", "<extensions>", "</gpx>"]
+                .iter()
+                .filter_map(|t| xml.find(t))
+                .min()
+                .ok_or("élément <gpx> introuvable")?;
+            let indent = indent_at(xml, anchor);
+            Ok(format!("{}{element}\n{indent}{}", &xml[..anchor], &xml[anchor..]))
+        }
+        WptEdit::Rename { lat, lon, name, new_name } => {
+            let w = find_wpt(xml, *lat, *lon, name)?;
+            Ok(match (w.name_span, w.self_closing) {
+                (Some((a, b)), _) => format!("{}{}{}", &xml[..a], escape(new_name.trim()), &xml[b..]),
+                (None, false) => format!("{}{}{}", &xml[..w.open_end], name_tag(new_name), &xml[w.open_end..]),
+                (None, true) => {
+                    let open = xml[w.start..w.open_end].trim_end_matches('>').trim_end_matches('/').trim_end();
+                    format!("{}{open}>{}</wpt>{}", &xml[..w.start], name_tag(new_name), &xml[w.end..])
+                }
+            })
+        }
+        WptEdit::Move { lat, lon, name, to_lat, to_lon } => {
+            let w = find_wpt(xml, *lat, *lon, name)?;
+            let mut tag = xml[w.start..w.open_end].to_string();
+            for (k, v) in [("lat", to_lat), ("lon", to_lon)] {
+                let (a, b) = attr(&tag, k).ok_or("attribut de position illisible")?;
+                tag.replace_range(a..b, &coord(*v));
+            }
+            Ok(format!("{}{tag}{}", &xml[..w.start], &xml[w.open_end..]))
+        }
+        WptEdit::Delete { lat, lon, name } => {
+            let w = find_wpt(xml, *lat, *lon, name)?;
+            // Avec l'indentation et le retour à la ligne qui le précèdent.
+            let indent = indent_at(xml, w.start);
+            let mut start = w.start - indent.len();
+            if start > 0 && xml[..start].ends_with('\n') {
+                start -= 1;
+                if xml[..start].ends_with('\r') {
+                    start -= 1;
+                }
+            }
+            Ok(format!("{}{}", &xml[..start], &xml[w.end..]))
+        }
+    }
+}
+
+/// Applique des modifications de POI à un fichier GPX (vérifié, atomique).
+pub fn edit_wpts_file(path: &Path, edits: &[WptEdit]) -> Result<bool> {
+    let delta = edits
+        .iter()
+        .map(|e| match e {
+            WptEdit::Add { .. } => 1,
+            WptEdit::Delete { .. } => -1,
+            _ => 0,
+        })
+        .sum();
+    rewrite_counted(path, delta, |xml| edits.iter().try_fold(xml.to_string(), |x, e| with_wpt_edit(&x, e)))
 }
 
 #[cfg(test)]

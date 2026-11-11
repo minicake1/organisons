@@ -74,6 +74,16 @@ CREATE TABLE IF NOT EXISTS collection_traces (
     trace_id      INTEGER NOT NULL REFERENCES traces(id) ON DELETE CASCADE,
     PRIMARY KEY (collection_id, trace_id)
 );
+-- Catégorie choisie pour un POI, retrouvée à chaque relecture par sa position
+-- (micro-degrés) et son nom.
+CREATE TABLE IF NOT EXISTS poi_kinds (
+    trace_id INTEGER NOT NULL REFERENCES traces(id) ON DELETE CASCADE,
+    lat_e6   INTEGER NOT NULL,
+    lon_e6   INTEGER NOT NULL,
+    name     TEXT NOT NULL,
+    kind     TEXT NOT NULL,
+    PRIMARY KEY (trace_id, lat_e6, lon_e6, name)
+);
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -866,9 +876,18 @@ impl Index {
                     lat: r.get(3)?,
                     lon: r.get(4)?,
                     symbol: r.get(5)?,
+                    kind_user: false,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
+        let kinds = self.poi_kinds(id)?;
+        let mut pois = pois;
+        for p in &mut pois {
+            if let Some(k) = kinds.get(&poi_key(p.lat, p.lon, &p.name)) {
+                p.kind = *k;
+                p.kind_user = true;
+            }
+        }
         let mut st = self.conn.prepare("SELECT collection_id FROM collection_traces WHERE trace_id = ?1")?;
         let collection_ids = st.query_map([id], |r| r.get(0))?.collect::<std::result::Result<Vec<i64>, _>>()?;
         let profile: Vec<ProfilePoint> = serde_json::from_str(&profile_json)?;
@@ -972,6 +991,94 @@ fn row_to_summary(r: &rusqlite::Row) -> rusqlite::Result<TraceSummary> {
         poi_count: r.get(12)?,
         tags: tags.map(|t| t.split('\u{1f}').map(String::from).collect()).unwrap_or_default(),
     })
+}
+
+/// Clé d'un POI pour sa catégorie choisie : position en micro-degrés (environ
+/// 10 cm) et nom, qui tiennent à la relecture du fichier.
+pub type PoiKey = (i64, i64, String);
+
+pub fn poi_key(lat: f64, lon: f64, name: &str) -> PoiKey {
+    ((lat * 1e6).round() as i64, (lon * 1e6).round() as i64, name.to_string())
+}
+
+/// Regroupe les POI de plusieurs traces au même endroit : à moins de 60 m avec
+/// le même nom (casse, accents et espaces ignorés) ou un nom vide, ou à moins
+/// de 15 m quel que soit le nom. Le lieu prend le nom et la catégorie les plus
+/// fréquents ; une trace qui passe deux fois n'est comptée qu'une fois.
+pub(crate) fn group_places(pois: Vec<(PoiOnTrace, PoiKind, f64, f64)>) -> Vec<PoiPlace> {
+    use std::collections::HashMap;
+    const NEAR_SAME_NAME: f64 = 60.0;
+    const NEAR_ANY_NAME: f64 = 15.0;
+    let norm = |s: &str| crate::poi::normalize(s).split_whitespace().collect::<Vec<_>>().join(" ");
+    let dist = |a: (f64, f64), b: (f64, f64)| {
+        let (la1, la2) = (a.0.to_radians(), b.0.to_radians());
+        let dl = (b.1 - a.1).to_radians();
+        let x = dl * ((la1 + la2) / 2.0).cos();
+        let y = la2 - la1;
+        (x * x + y * y).sqrt() * 6_371_000.0
+    };
+    // Grille d'environ 110 m pour ne comparer qu'aux lieux voisins.
+    let cell = |lat: f64, lon: f64| ((lat * 1000.0).floor() as i64, (lon * 1000.0).floor() as i64);
+    struct Group {
+        lat: f64,
+        lon: f64,
+        names: Vec<String>,
+        kinds: Vec<PoiKind>,
+        traces: Vec<PoiOnTrace>,
+    }
+    let mut groups: Vec<Group> = Vec::new();
+    let mut grid: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
+    for (on, kind, lat, lon) in pois {
+        let n = norm(&on.name);
+        let (cy, cx) = cell(lat, lon);
+        let found = (-1..=1)
+            .flat_map(|dy| (-1..=1).map(move |dx| (cy + dy, cx + dx)))
+            .filter_map(|c| grid.get(&c))
+            .flatten()
+            .copied()
+            .find(|&g| {
+                let gr = &groups[g];
+                let d = dist((gr.lat, gr.lon), (lat, lon));
+                let gname = norm(gr.names.first().map(String::as_str).unwrap_or(""));
+                d <= NEAR_ANY_NAME || (d <= NEAR_SAME_NAME && (n.is_empty() || gname.is_empty() || n == gname))
+            });
+        match found {
+            Some(g) => {
+                let gr = &mut groups[g];
+                if !gr.traces.iter().any(|t| t.trace_id == on.trace_id) {
+                    gr.names.push(on.name.clone());
+                    gr.kinds.push(kind);
+                    gr.traces.push(on);
+                }
+            }
+            None => {
+                grid.entry((cy, cx)).or_default().push(groups.len());
+                groups.push(Group { lat, lon, names: vec![on.name.clone()], kinds: vec![kind], traces: vec![on] });
+            }
+        }
+    }
+    fn most<T: Clone + Eq + std::hash::Hash>(items: impl Iterator<Item = T>) -> Option<T> {
+        let mut count: HashMap<T, usize> = HashMap::new();
+        let mut order = Vec::new();
+        for i in items {
+            let c = count.entry(i.clone()).or_insert(0);
+            if *c == 0 {
+                order.push(i);
+            }
+            *c += 1;
+        }
+        order.into_iter().max_by_key(|i| count[i])
+    }
+    groups
+        .into_iter()
+        .map(|g| PoiPlace {
+            name: most(g.names.iter().filter(|n| !n.trim().is_empty()).cloned()).unwrap_or_default(),
+            kind: most(g.kinds.iter().copied()).unwrap_or(PoiKind::Other),
+            lat: g.lat,
+            lon: g.lon,
+            traces: g.traces,
+        })
+        .collect()
 }
 
 /// Empreinte de la géométrie : le revêtement est à recalculer si la trace change
@@ -1514,6 +1621,73 @@ impl Index {
             });
         }
         Ok(out)
+    }
+
+    /// Catégories choisies pour les POI d'une trace, par position et nom.
+    pub fn poi_kinds(&self, trace_id: i64) -> Result<std::collections::HashMap<PoiKey, PoiKind>> {
+        let mut st = self.conn.prepare("SELECT lat_e6, lon_e6, name, kind FROM poi_kinds WHERE trace_id = ?1")?;
+        let rows = st.query_map([trace_id], |r| Ok(((r.get(0)?, r.get(1)?, r.get(2)?), PoiKind::parse(&r.get::<_, String>(3)?))))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Vue d'ensemble : POI de toutes les traces, catégorie choisie appliquée,
+    /// regroupés quand ils sont au même endroit (voir `group_places`).
+    pub fn poi_places(&self) -> Result<Vec<PoiPlace>> {
+        let mut chosen: std::collections::HashMap<(i64, PoiKey), PoiKind> = std::collections::HashMap::new();
+        let mut st = self.conn.prepare("SELECT trace_id, lat_e6, lon_e6, name, kind FROM poi_kinds")?;
+        for row in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, (r.get(1)?, r.get(2)?, r.get(3)?), r.get::<_, String>(4)?)))? {
+            let (id, key, kind) = row?;
+            chosen.insert((id, key), PoiKind::parse(&kind));
+        }
+        let mut st = self.conn.prepare(
+            "SELECT p.trace_id, t.name, p.name, p.kind, p.km, p.lat, p.lon
+             FROM pois p JOIN traces t ON t.id = p.trace_id ORDER BY p.trace_id, p.idx",
+        )?;
+        let mut pois = Vec::new();
+        for row in st.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, f64>(4)?,
+                r.get::<_, f64>(5)?,
+                r.get::<_, f64>(6)?,
+            ))
+        })? {
+            let (trace_id, trace_name, name, kind, km, lat, lon) = row?;
+            let kind = chosen.get(&(trace_id, poi_key(lat, lon, &name))).copied().unwrap_or_else(|| PoiKind::parse(&kind));
+            pois.push((PoiOnTrace { trace_id, trace_name, km, name }, kind, lat, lon));
+        }
+        Ok(group_places(pois))
+    }
+
+    /// Catégorie choisie pour le POI `idx` d'une trace (`None` : retour à la catégorie détectée).
+    pub fn set_poi_kind(&self, trace_id: i64, idx: i64, kind: Option<PoiKind>) -> Result<()> {
+        let (lat, lon, name): (f64, f64, String) = self
+            .conn
+            .query_row("SELECT lat, lon, name FROM pois WHERE trace_id = ?1 AND idx = ?2", params![trace_id, idx], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .optional()?
+            .ok_or_else(|| Error::NotFound(format!("POI {idx} de la trace {trace_id}")))?;
+        self.set_poi_kind_at(trace_id, poi_key(lat, lon, &name), kind)
+    }
+
+    pub(crate) fn set_poi_kind_at(&self, trace_id: i64, key: PoiKey, kind: Option<PoiKind>) -> Result<()> {
+        let (lat, lon, name) = key;
+        match kind {
+            Some(k) => self.conn.execute(
+                "INSERT INTO poi_kinds(trace_id, lat_e6, lon_e6, name, kind) VALUES (?1,?2,?3,?4,?5)
+                 ON CONFLICT(trace_id, lat_e6, lon_e6, name) DO UPDATE SET kind = excluded.kind",
+                params![trace_id, lat, lon, name, k.as_str()],
+            )?,
+            None => self.conn.execute(
+                "DELETE FROM poi_kinds WHERE trace_id = ?1 AND lat_e6 = ?2 AND lon_e6 = ?3 AND name = ?4",
+                params![trace_id, lat, lon, name],
+            )?,
+        };
+        Ok(())
     }
 
     /// Catégorie choisie pour une séance (`None` : retour à la catégorie détectée).

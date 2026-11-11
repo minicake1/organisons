@@ -80,6 +80,49 @@ export interface Poi {
   lat: number
   lon: number
   symbol: string | null
+  /** Catégorie choisie dans l'appli (sinon détectée). */
+  kindUser: boolean
+}
+
+/** Modification d'un point d'intérêt dans le GPX (le POI désigné par sa position et son nom). */
+export type PoiEdit = (
+  | { op: 'add'; lat: number; lon: number; name: string }
+  | { op: 'rename'; lat: number; lon: number; name: string; newName: string }
+  | { op: 'move'; lat: number; lon: number; name: string; toLat: number; toLon: number }
+  | { op: 'delete'; lat: number; lon: number; name: string }
+) & { kind?: PoiKind | null }
+
+/** Lieu de la vue d'ensemble des POI : les POI de plusieurs traces au même endroit. */
+export interface PoiPlace {
+  name: string
+  kind: PoiKind
+  lat: number
+  lon: number
+  traces: { traceId: number; traceName: string; km: number; name: string }[]
+}
+
+/** Règle d'une catégorie pour les POI proposés depuis OpenStreetMap. */
+export interface OsmRule {
+  enabled: boolean
+  /** Distance à la trace au plus (m) ; 30 m : « sur la trace ». */
+  maxM: number
+}
+/** Densité, commune aux catégories mais comptée pour chacune : au plus `count` points par tranche de `everyKm` km. */
+export interface OsmDensity {
+  count: number
+  everyKm: number
+}
+export type OsmRules = Partial<Record<PoiKind, OsmRule>>
+/** Point d'intérêt proposé depuis OpenStreetMap. */
+export interface OsmCandidate {
+  id: string
+  name: string
+  what: string
+  kind: PoiKind
+  lat: number
+  lon: number
+  km: number
+  distanceM: number
 }
 
 export type SurfaceClass = 'paved' | 'cobbles' | 'gravel' | 'unpaved' | 'unknown'
@@ -217,6 +260,13 @@ export const api = {
   setCollectionTour: (id: number, isTour: boolean) => invoke<void>('set_collection_tour', { id, isTour }),
   listWorkouts: () => invoke<WorkoutSummary[]>('list_workouts'),
   setWorkoutCategory: (id: number, category: WorkoutCategory | null) => invoke<void>('set_workout_category', { id, category }),
+  setPoiKind: (traceId: number, idx: number, kind: PoiKind | null) => invoke<void>('set_poi_kind', { traceId, idx, kind }),
+  editPois: (traceId: number, edits: PoiEdit[]) => invoke<void>('edit_pois', { traceId, edits }),
+  poiPlaces: () => invoke<PoiPlace[]>('poi_places'),
+  osmRules: () => invoke<{ rules: OsmRules; density: OsmDensity | null; startKm: number }>('osm_rules'),
+  osmRulesSet: (rules: OsmRules, density: OsmDensity | null, startKm: number) =>
+    invoke<void>('osm_rules_set', { settings: { rules, density, startKm } }),
+  osmSearch: (traceId: number, rules: OsmRules) => invoke<OsmCandidate[]>('osm_search', { traceId, rules }),
   zwiftFolders: () => invoke<string[]>('zwift_folders'),
   zwiftSend: (ids: number[], folder: string) => invoke<string[]>('zwift_send', { ids, folder }),
   icuStatus: () => invoke<IcuStatus>('icu_status'),

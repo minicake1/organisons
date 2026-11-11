@@ -155,6 +155,32 @@ pub struct Poi {
     pub lat: f64,
     pub lon: f64,
     pub symbol: Option<String>,
+    /// Catégorie choisie par l'utilisateur (sinon détectée).
+    #[serde(default)]
+    pub kind_user: bool,
+}
+
+/// Un lieu de la vue d'ensemble des POI : les POI de plusieurs traces au même
+/// endroit (et de même nom) regroupés.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PoiPlace {
+    pub name: String,
+    pub kind: PoiKind,
+    pub lat: f64,
+    pub lon: f64,
+    /// Traces qui ont ce POI, avec son km sur chacune (une trace une seule fois).
+    pub traces: Vec<PoiOnTrace>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PoiOnTrace {
+    pub trace_id: i64,
+    pub trace_name: String,
+    pub km: f64,
+    /// Nom du POI dans cette trace (il peut différer un peu).
+    pub name: String,
 }
 
 /// Un point du profil, ré-échantillonné à pas constant.

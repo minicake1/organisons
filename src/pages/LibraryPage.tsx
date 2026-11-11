@@ -7,8 +7,10 @@ import {
   Button,
   Card,
   Checkbox,
+  Code,
   Collapse,
   Group,
+  Modal,
   NumberInput,
   Paper,
   ScrollArea,
@@ -25,6 +27,7 @@ import {
 } from '@mantine/core'
 import {
   IconChevronDown,
+  IconTrash,
   IconChevronUp,
   IconFileImport,
   IconFilter,
@@ -85,6 +88,9 @@ export default function LibraryPage({
   const [selecting, setSelecting] = useState(false)
   const [picked, setPicked] = useState<number[]>([])
   const [batchOpen, setBatchOpen] = useState(false)
+  // Suppression par lot : confirmation, puis avancement « n / total ».
+  const [trashAsk, setTrashAsk] = useState(false)
+  const [trashBusy, setTrashBusy] = useState<string | null>(null)
   // Compte Hammerhead connecté : envoi de la sélection vers le Karoo.
   const [karoo, setKaroo] = useState(false)
   const [karooBusy, setKarooBusy] = useState<string | null>(null)
@@ -278,9 +284,61 @@ export default function LibraryPage({
             <Button size="compact-sm" ml={karoo ? undefined : "auto"} leftSection={<IconPencil size={14} />} disabled={!shown.length} onClick={() => setBatchOpen(true)}>
               Modifier tags, sport, collections…
             </Button>
+            <Button
+              size="compact-sm"
+              color="red"
+              variant="light"
+              leftSection={<IconTrash size={14} />}
+              disabled={!shown.length || trashBusy != null}
+              loading={trashBusy != null}
+              onClick={() => setTrashAsk(true)}
+            >
+              Supprimer{trashBusy ? ` (${trashBusy})` : ''}
+            </Button>
           </Group>
         </Paper>
       )}
+      <Modal opened={trashAsk} onClose={() => setTrashAsk(false)} title="Supprimer les traces sélectionnées">
+        <Stack gap="sm">
+          <Text size="sm">
+            {shown.length === 1 ? `« ${shown[0].name} » part` : `Ces ${shown.length} traces partent`} dans la corbeille d’Organisons : les GPX sont
+            déplacés dans le dossier caché <Code>.organisons-corbeille</Code> de leur bibliothèque, récupérables depuis l’onglet Corbeille jusqu’au
+            vidage.
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setTrashAsk(false)}>
+              Annuler
+            </Button>
+            <Button
+              color="red"
+              leftSection={<IconTrash size={16} />}
+              onClick={async () => {
+                setTrashAsk(false)
+                const ids = shown.map((t) => t.id)
+                const errors: string[] = []
+                let done = 0
+                for (const id of ids) {
+                  setTrashBusy(`${done} / ${ids.length}`)
+                  try {
+                    await api.trashTrace(id)
+                    done++
+                  } catch (e) {
+                    errors.push(String(e))
+                  }
+                }
+                setTrashBusy(null)
+                setPicked([])
+                setNotice(`${done} trace(s) mise(s) à la corbeille.`)
+                if (errors.length) setError(`${errors.length} trace(s) non supprimée(s) : ${errors.slice(0, 3).join(' / ')}`)
+                window.dispatchEvent(new Event('organisons:corbeille'))
+                load()
+              }}
+            >
+              Mettre {shown.length} trace(s) à la corbeille
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
       <BatchEditModal
         opened={batchOpen}
         traces={shown}

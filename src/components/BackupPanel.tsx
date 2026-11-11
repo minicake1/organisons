@@ -94,7 +94,7 @@ export default function BackupPanel() {
       <Stack gap="sm">
         <Text size="xs" c="dimmed">
           Un fichier pour retrouver ta configuration après une réinstallation, un crash ou sur un autre PC : bibliothèques et leurs réglages,
-          tags (détection, mots-clés), collections et tours, et pour chaque trace le nom et le sport choisis, les tags et les notes ; plus le
+          tags (détection, mots-clés), collections et tours, et pour chaque trace le nom et le sport choisis, les tags, les notes et les catégories de POI choisies ; plus le
           thème, la FTP et le dossier Zwift. Les traces sont retrouvées par l’empreinte de leur fichier, même déplacées. Les mots de passe et
           jetons n’y sont jamais : reconnecte Komoot, Hammerhead et intervals.icu après une restauration.
         </Text>

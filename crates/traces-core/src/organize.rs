@@ -450,6 +450,77 @@ pub fn replace_trace_file(index: &mut Index, trace_id: i64, new_file: &Path, now
     Ok(())
 }
 
+/// Modification d'un point d'intérêt, avec la catégorie à donner à un POI ajouté.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PoiEdit {
+    #[serde(flatten)]
+    pub edit: crate::gpxmeta::WptEdit,
+    #[serde(default)]
+    pub kind: Option<crate::model::PoiKind>,
+}
+
+/// Modifie les points d'intérêt d'une trace dans son GPX (ajout, nom, position,
+/// suppression), puis la relit. Les catégories choisies suivent les POI renommés
+/// ou déplacés. Refusé si la bibliothèque n'autorise pas l'écriture dans les GPX.
+pub fn edit_pois(index: &mut Index, trace_id: i64, edits: &[PoiEdit], now: i64) -> Result<()> {
+    use crate::gpxmeta::WptEdit;
+    use crate::index::poi_key;
+    let (library, path, tags, notes) = index.trace_file(trace_id)?;
+    if !library.write_gpx {
+        return Err(crate::Error::Invalid(format!(
+            "La bibliothèque « {} » n'autorise pas la modification des GPX : active-la dans Réglages pour modifier les points d'intérêt.",
+            library.name
+        )));
+    }
+    if !PathBuf::from(&library.path).is_dir() {
+        return Err(crate::Error::Invalid(format!("{} : dossier injoignable ({})", library.name, library.path)));
+    }
+    let target = PathBuf::from(&path);
+    let wpts: Vec<WptEdit> = edits.iter().map(|e| e.edit.clone()).collect();
+    crate::gpxmeta::edit_wpts_file(&target, &wpts)?;
+
+    // Catégories choisies : déplacées avec leur POI.
+    let mut kinds = index.poi_kinds(trace_id)?;
+    for e in edits {
+        match &e.edit {
+            WptEdit::Add { lat, lon, name } => {
+                if let Some(k) = e.kind {
+                    index.set_poi_kind_at(trace_id, poi_key(*lat, *lon, name.trim()), Some(k))?;
+                }
+            }
+            WptEdit::Rename { lat, lon, name, new_name } => {
+                let old = poi_key(*lat, *lon, name.trim());
+                if let Some(k) = kinds.remove(&old) {
+                    index.set_poi_kind_at(trace_id, old, None)?;
+                    let new = poi_key(*lat, *lon, new_name.trim());
+                    index.set_poi_kind_at(trace_id, new.clone(), Some(k))?;
+                    kinds.insert(new, k);
+                }
+            }
+            WptEdit::Move { lat, lon, name, to_lat, to_lon } => {
+                let old = poi_key(*lat, *lon, name.trim());
+                if let Some(k) = kinds.remove(&old) {
+                    index.set_poi_kind_at(trace_id, old, None)?;
+                    let new = poi_key(*to_lat, *to_lon, name.trim());
+                    index.set_poi_kind_at(trace_id, new.clone(), Some(k))?;
+                    kinds.insert(new, k);
+                }
+            }
+            WptEdit::Delete { lat, lon, name } => {
+                let old = poi_key(*lat, *lon, name.trim());
+                if kinds.remove(&old).is_some() {
+                    index.set_poi_kind_at(trace_id, old, None)?;
+                }
+            }
+        }
+    }
+    scan::index_file(index, &library, &target, &path, now)?;
+    index.set_tags(trace_id, &tags)?;
+    index.set_notes(trace_id, &notes)?;
+    Ok(())
+}
+
 /// Copie des GPX dans une bibliothèque gérée, directement à leur place, puis
 /// les indexe. Les fichiers d'origine ne sont pas touchés.
 pub fn import_files(index: &mut Index, library: &Library, files: &[String], now: i64) -> Result<OrganizeReport> {

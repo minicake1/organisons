@@ -199,6 +199,7 @@ pub fn analyze_gpx(gpx: &gpx::Gpx, fallback_name: &str) -> Option<TraceAnalysis>
                 lat,
                 lon,
                 symbol: w.symbol.clone().or_else(|| w.type_.clone()),
+                kind_user: false,
             }
         })
         .collect::<Vec<_>>();

@@ -8,9 +8,10 @@ import {
   Checkbox,
   Chip,
   Code,
-  Collapse,
   Group,
   Loader,
+  Menu,
+  Modal,
   Paper,
   SegmentedControl,
   Select,
@@ -23,9 +24,9 @@ import {
   Title,
   Tooltip,
 } from '@mantine/core'
-import { IconArrowLeft, IconCheck, IconChevronDown, IconEdit, IconFolderOpen, IconPencil } from '@tabler/icons-react'
+import { IconArrowLeft, IconArrowsMove, IconCheck, IconChevronDown, IconDotsVertical, IconMapPinPlus, IconTrash, IconWorldSearch, IconEdit, IconFolderOpen, IconPencil } from '@tabler/icons-react'
 import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener'
-import { api, type Collection, type Poi, type PoiKind, type TraceDetail } from '../api'
+import { api, type Collection, type Poi, type PoiEdit, type PoiKind, type TraceDetail } from '../api'
 import SportBadge from '../components/SportBadge'
 import TagSuggestions from '../components/TagSuggestions'
 import TrashButton from '../components/TrashButton'
@@ -35,6 +36,8 @@ import { HILLINESS, POI_KINDS, SURFACE_CLASSES, int, km1, poiKind, slopeColor, s
 import { computeSurface } from '../osmSurface'
 import ElevationProfile from '../components/ElevationProfile'
 import TraceMap from '../components/TraceMap'
+import { PoiCategory } from '../components/PoiCategory'
+import OsmPoiModal from '../components/OsmPoiModal'
 import WindArrow from '../components/WindArrow'
 
 export default function TracePage({
@@ -61,6 +64,19 @@ export default function TracePage({
   const [saveError, setSaveError] = useState<string | null>(null)
   const [poiOrder, setPoiOrder] = useState<'km' | 'kind'>('kind')
   const [folded, setFolded] = useState<Partial<Record<PoiKind, boolean>>>({})
+  const [poiMenu, setPoiMenu] = useState<number | null>(null)
+  // Mode édition des POI (écrits dans le GPX) : sélection, point à placer, formulaire.
+  const [poiEditing, setPoiEditing] = useState(false)
+  const [sel, setSel] = useState<number[]>([])
+  const [pick, setPick] = useState<null | { mode: 'add' } | { mode: 'move'; i: number }>(null)
+  const [poiForm, setPoiForm] = useState<
+    null | { mode: 'add'; lat: number; lon: number; name: string; kind: PoiKind } | { mode: 'rename'; i: number; name: string }
+  >(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [osmOpen, setOsmOpen] = useState(false)
+  const [poiBusy, setPoiBusy] = useState(false)
+  const [poiError, setPoiError] = useState<string | null>(null)
+  const [canWrite, setCanWrite] = useState<boolean | null>(null)
   const [editing, setEditing] = useState(false)
   const [deviceNotice, setDeviceNotice] = useState<string | null>(null)
   const [offline, setOffline] = useState<number[]>([])
@@ -109,7 +125,18 @@ export default function TracePage({
     api.sports().then(setSports).catch(() => {})
     api.collections().then(setCollections).catch(() => {})
     api.offlineLibraries().then(setOffline).catch(() => {})
+    setPoiEditing(false)
+    setSel([])
+    setPick(null)
   }, [id])
+  // Écriture dans le GPX autorisée par la bibliothèque de la trace (édition des POI).
+  useEffect(() => {
+    if (!t) return
+    api
+      .listLibraries()
+      .then((ls) => setCanWrite(ls.find((l) => l.id === t.libraryId)?.writeGpx ?? false))
+      .catch(() => setCanWrite(null))
+  }, [t?.libraryId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Enregistre ; si l'écriture dans le GPX échoue, l'index est à jour et on le signale. */
   const save = (p: Promise<void>) => {
@@ -119,7 +146,7 @@ export default function TracePage({
 
   const kindOn = (k: PoiKind) => kinds[k] ?? poiKind(k).byDefault
   const checked = (i: number) => picks[i] ?? (t ? kindOn(t.pois[i].kind) : false)
-  const visiblePois = useMemo(() => (t && mapPois ? t.pois.filter((_, i) => checked(i)) : []), [t, mapPois, kinds, picks]) // eslint-disable-line react-hooks/exhaustive-deps
+  const visiblePois = useMemo(() => (t && poiEditing ? t.pois : t && mapPois ? t.pois.filter((_, i) => checked(i)) : []), [t, mapPois, kinds, picks, poiEditing]) // eslint-disable-line react-hooks/exhaustive-deps
   // Couleur de chaque tronçon : pente, ou revêtement OSM (gris tant qu’il n’est pas calculé).
   const colors = useMemo(() => {
     if (!t) return []
@@ -163,26 +190,163 @@ export default function TracePage({
     setPicks((s) => Object.fromEntries(Object.entries(s).filter(([i]) => t.pois[Number(i)].kind !== k)))
   }
   const setAll = (v: boolean) => setPicks(Object.fromEntries(t.pois.map((_, i) => [i, v])))
+  const changePoiKind = (i: number, kind: PoiKind | null) =>
+    api
+      .setPoiKind(t.id, i, kind)
+      .then(() => api.getTrace(t.id))
+      .then(setT)
+      .catch((e) => setError(String(e)))
+  // Modifications des POI écrites dans le GPX, puis trace relue (les indices changent).
+  const runEdits = (edits: PoiEdit[]) => {
+    setPoiBusy(true)
+    setPoiError(null)
+    return api
+      .editPois(t.id, edits)
+      .then(() => api.getTrace(t.id))
+      .then((nt) => {
+        setT(nt)
+        setSel([])
+        setPicks({})
+      })
+      .catch((e) => setPoiError(String(e)))
+      .finally(() => setPoiBusy(false))
+  }
+  const at = (p: Poi) => ({ lat: p.lat, lon: p.lon, name: p.name })
+  const placeAt = (lat: number, lon: number) => {
+    if (!pick) return
+    if (pick.mode === 'add') setPoiForm({ mode: 'add', lat, lon, name: '', kind: 'other' })
+    else runEdits([{ op: 'move', ...at(t.pois[pick.i]), toLat: lat, toLon: lon }])
+    setPick(null)
+  }
+  const setSelKind = async (kind: PoiKind) => {
+    setPoiBusy(true)
+    setPoiError(null)
+    try {
+      for (const i of sel) await api.setPoiKind(t.id, i, kind)
+      setT(await api.getTrace(t.id))
+      setSel([])
+    } catch (e) {
+      setPoiError(String(e))
+    } finally {
+      setPoiBusy(false)
+    }
+  }
+  const editButton = (
+    <Tooltip
+      label="La bibliothèque de cette trace n'autorise pas la modification des GPX (Réglages → Bibliothèques)."
+      disabled={canWrite !== false}
+    >
+      <Button
+        size="compact-sm"
+        variant="default"
+        leftSection={<IconPencil size={14} />}
+        data-disabled={canWrite === false || undefined}
+        onClick={(e) => (canWrite === false ? e.preventDefault() : (setPoiEditing(true), setPoiError(null)))}
+      >
+        Modifier
+      </Button>
+    </Tooltip>
+  )
+  const isOn = (i: number) => (poiEditing ? sel.includes(i) : checked(i))
   const poiRow = (p: Poi, i: number) => (
     <Checkbox
       key={i}
       py={6}
       style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}
-      checked={checked(i)}
+      checked={isOn(i)}
       onChange={(e) => {
         const v = e.currentTarget.checked
+        if (poiEditing) return setSel((s) => (v ? [...s, i] : s.filter((x) => x !== i)))
         if (v) setMapPois(true)
         setPicks((s) => ({ ...s, [i]: v }))
       }}
       label={
         <Group gap={8} wrap="nowrap">
-          <Box w={10} h={10} style={{ borderRadius: '50%', background: poiKind(p.kind).color, flex: 'none' }} />
+          {/* Pastille : couleur de la catégorie, entourée quand elle est choisie ; un clic ouvre le menu. */}
+          <Box
+            component="button"
+            aria-label="Changer la catégorie du POI"
+            onClick={(e: React.MouseEvent) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setPoiMenu(i)
+            }}
+            w={14}
+            h={14}
+            p={0}
+            style={{
+              borderRadius: '50%',
+              background: poiKind(p.kind).color,
+              flex: 'none',
+              cursor: 'pointer',
+              border: p.kindUser ? '2px solid var(--mantine-color-text)' : '2px solid transparent',
+            }}
+          />
           <Text size="sm" lineClamp={1} style={{ flex: 1 }}>
             {p.name || '(sans nom)'}
           </Text>
           <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
             km {km1(p.km)}
           </Text>
+          {/* ⋮ : changer la catégorie (gardée à la relecture et dans la sauvegarde). */}
+          <Menu position="bottom-end" withinPortal shadow="md" opened={poiMenu === i} onChange={(o) => setPoiMenu(o ? i : null)}>
+            <Menu.Target>
+              <ActionIcon
+                size="sm"
+                variant="subtle"
+                color="gray"
+                aria-label="Changer la catégorie du POI"
+                onClick={(e: React.MouseEvent) => {
+                e.preventDefault()
+                e.stopPropagation()
+              }}
+              >
+                <IconDotsVertical size={16} />
+              </ActionIcon>
+            </Menu.Target>
+            <Menu.Dropdown onClick={(e) => e.stopPropagation()}>
+              {poiEditing && (
+                <>
+                  <Menu.Item leftSection={<IconPencil size={14} />} onClick={() => setPoiForm({ mode: 'rename', i, name: p.name })}>
+                    Renommer
+                  </Menu.Item>
+                  <Menu.Item leftSection={<IconArrowsMove size={14} />} onClick={() => setPick({ mode: 'move', i })}>
+                    Déplacer
+                  </Menu.Item>
+                  <Menu.Item
+                    color="red"
+                    leftSection={<IconTrash size={14} />}
+                    onClick={() => {
+                      setSel([i])
+                      setConfirmDelete(true)
+                    }}
+                  >
+                    Supprimer
+                  </Menu.Item>
+                  <Menu.Divider />
+                </>
+              )}
+              <Menu.Label>Catégorie de « {p.name || 'sans nom'} »</Menu.Label>
+              {POI_KINDS.map((k) => (
+                <Menu.Item
+                  key={k.kind}
+                  leftSection={<Box w={10} h={10} style={{ borderRadius: '50%', background: k.color }} />}
+                  rightSection={k.kind === p.kind ? <IconCheck size={14} /> : null}
+                  onClick={() => changePoiKind(i, k.kind)}
+                >
+                  {k.label}
+                </Menu.Item>
+              ))}
+              {p.kindUser && (
+                <>
+                  <Menu.Divider />
+                  <Menu.Item c="dimmed" onClick={() => changePoiKind(i, null)}>
+                    Revenir à la catégorie détectée
+                  </Menu.Item>
+                </>
+              )}
+            </Menu.Dropdown>
+          </Menu>
         </Group>
       }
       styles={{ body: { alignItems: 'center' }, labelWrapper: { flex: 1, minWidth: 0 } }}
@@ -278,7 +442,7 @@ export default function TracePage({
         <Stack gap="md" style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
           <Paper withBorder radius="md" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
             <Box style={{ position: 'relative', flex: 1, minHeight: 200 }}>
-              <TraceMap profile={t.profile} pois={visiblePois} cursor={cursor} colors={mapColors} onView={setRange} />
+              <TraceMap profile={t.profile} pois={visiblePois} cursor={cursor} colors={mapColors} onView={setRange} onPick={pick ? placeAt : undefined} />
             </Box>
             <Stack gap="sm" p="md">
               <Group>
@@ -303,6 +467,7 @@ export default function TracePage({
                 colors={shownColors}
                 range={range}
                 height="clamp(130px, 20vh, 220px)"
+                onPick={pick ? (i) => placeAt(t.profile[i].lat, t.profile[i].lon) : undefined}
               />
               {mode === 'slope' ? (
                 <Group gap="md" wrap="wrap">
@@ -506,24 +671,120 @@ export default function TracePage({
                   Points d'intérêt
                 </Text>
                 <Text size="xs" c="dimmed">
-                  {visiblePois.length} sur la carte / {t.pois.length}
+                  {poiEditing ? `${sel.length} sélectionné(s) / ${t.pois.length}` : `${visiblePois.length} sur la carte / ${t.pois.length}`}
                 </Text>
+                {poiEditing && (
+                  <Button size="compact-sm" onClick={() => (setPoiEditing(false), setSel([]), setPick(null))}>
+                    Terminer
+                  </Button>
+                )}
               </Group>
+              {poiEditing && (
+                <Stack gap={6}>
+                  <Group gap="xs">
+                    <Button
+                      size="compact-sm"
+                      variant={pick?.mode === 'add' ? 'filled' : 'default'}
+                      leftSection={<IconMapPinPlus size={14} />}
+                      onClick={() => setPick(pick?.mode === 'add' ? null : { mode: 'add' })}
+                    >
+                      Ajouter un POI
+                    </Button>
+                    <Button size="compact-sm" variant="default" leftSection={<IconWorldSearch size={14} />} onClick={() => setOsmOpen(true)}>
+                      OpenStreetMap…
+                    </Button>
+                    <Menu position="bottom-start" withinPortal shadow="md">
+                      <Menu.Target>
+                        <Button size="compact-sm" variant="default" disabled={!sel.length} rightSection={<IconChevronDown size={14} />}>
+                          Catégorie
+                        </Button>
+                      </Menu.Target>
+                      <Menu.Dropdown>
+                        {POI_KINDS.map((k) => (
+                          <Menu.Item
+                            key={k.kind}
+                            leftSection={<Box w={10} h={10} style={{ borderRadius: '50%', background: k.color }} />}
+                            onClick={() => setSelKind(k.kind)}
+                          >
+                            {k.label}
+                          </Menu.Item>
+                        ))}
+                      </Menu.Dropdown>
+                    </Menu>
+                    <Button
+                      size="compact-sm"
+                      variant="default"
+                      color="red"
+                      disabled={!sel.length}
+                      leftSection={<IconTrash size={14} />}
+                      onClick={() => setConfirmDelete(true)}
+                    >
+                      Supprimer
+                    </Button>
+                    {sel.length > 0 && (
+                      <Button size="compact-sm" variant="subtle" color="gray" onClick={() => setSel([])}>
+                        Désélectionner
+                      </Button>
+                    )}
+                    {poiBusy && <Loader size="xs" />}
+                  </Group>
+                  {pick ? (
+                    <Paper p="xs" bg="var(--mantine-color-indigo-light)" c="var(--mantine-color-indigo-light-color)">
+                      <Group gap="xs">
+                        <Text size="sm" style={{ flex: 1 }}>
+                          {pick.mode === 'add'
+                            ? 'Clique sur la carte (position exacte) ou sur le profil (point de la trace) pour placer le nouveau POI.'
+                            : `Clique sur la carte ou le profil pour déplacer « ${t.pois[pick.i]?.name || 'sans nom'} ».`}
+                        </Text>
+                        <Button size="compact-xs" variant="subtle" onClick={() => setPick(null)}>
+                          Annuler
+                        </Button>
+                      </Group>
+                    </Paper>
+                  ) : (
+                    <Text size="xs" c="dimmed">
+                      Coche des POI pour changer leur catégorie ou les supprimer ; ⋮ au bout d'une ligne pour renommer, déplacer ou supprimer.
+                      Les modifications sont écrites dans le fichier GPX ; la catégorie reste dans Organisons.
+                    </Text>
+                  )}
+                  {poiError && (
+                    <Text size="sm" c="red" onClick={() => setPoiError(null)}>
+                      {poiError}
+                    </Text>
+                  )}
+                </Stack>
+              )}
               {t.pois.length === 0 ? (
-                <Text size="sm" c="dimmed">
-                  Ce fichier ne contient pas de points d'intérêt (waypoints).
-                </Text>
+                <Group gap="xs" wrap="nowrap">
+                  <Text size="sm" c="dimmed" style={{ flex: 1 }}>
+                    Ce fichier ne contient pas de points d'intérêt (waypoints).
+                  </Text>
+                  {!poiEditing && editButton}
+                </Group>
               ) : (
                 <>
-                  <Checkbox label="Afficher les POI sur la carte" checked={mapPois} onChange={(e) => setMapPois(e.currentTarget.checked)} fw={600} />
-                  <Group gap="xs">
-                    <Button size="compact-xs" variant="default" onClick={() => (setMapPois(true), setAll(true))}>
-                      Tout cocher
-                    </Button>
-                    <Button size="compact-xs" variant="default" onClick={() => setAll(false)}>
-                      Tout décocher
-                    </Button>
-                  </Group>
+                  {!poiEditing && (
+                    <>
+                      <Group gap="xs" wrap="nowrap">
+                        <Checkbox
+                          label="Afficher les POI sur la carte"
+                          checked={mapPois}
+                          onChange={(e) => setMapPois(e.currentTarget.checked)}
+                          fw={600}
+                          style={{ flex: 1 }}
+                        />
+                        {editButton}
+                      </Group>
+                      <Group gap="xs">
+                        <Button size="compact-xs" variant="default" onClick={() => (setMapPois(true), setAll(true))}>
+                          Tout cocher
+                        </Button>
+                        <Button size="compact-xs" variant="default" onClick={() => setAll(false)}>
+                          Tout décocher
+                        </Button>
+                      </Group>
+                    </>
+                  )}
                   <SegmentedControl
                     size="xs"
                     value={poiOrder}
@@ -533,69 +794,41 @@ export default function TracePage({
                       { value: 'kind', label: 'Par catégorie' },
                     ]}
                   />
-                  <Box>
+                  {!poiEditing && (
+                    <Text size="xs" c="dimmed">
+                      Catégorie mal reconnue : ⋮ au bout de la ligne (ou clic sur la pastille). Pastille entourée : catégorie choisie. « Modifier »
+                      pour ajouter, renommer, déplacer ou supprimer des POI.
+                    </Text>
+                  )}
+                  {/* La liste défile seule : en-tête, outils et Classement restent visibles. */}
+                  <Box style={{ maxHeight: 'max(280px, calc(100dvh - 420px))', overflowY: 'auto', overscrollBehavior: 'contain', marginRight: -6, paddingRight: 6 }}>
                     <Stack gap={0}>
                       {poiOrder === 'km'
                         ? t.pois.map((p, i) => poiRow(p, i))
                         : POI_KINDS.map((k) => {
                             const idx = t.pois.map((p, i) => (p.kind === k.kind ? i : -1)).filter((i) => i >= 0)
                             if (!idx.length) return null
-                            const on = idx.filter((i) => checked(i)).length
+                            const on = idx.filter((i) => isOn(i)).length
                             return (
-                              <Box key={k.kind} mt={6}>
-                                <Group
-                                  gap={8}
-                                  px={8}
-                                  py={6}
-                                  wrap="nowrap"
-                                  style={{ background: k.color, borderRadius: 8, position: 'sticky', top: 0, zIndex: 1 }}
-                                >
-                                  <Checkbox
-                                    size="xs"
-                                    color="dark"
-                                    styles={{ input: { borderColor: '#fff' } }}
-                                    checked={on === idx.length}
-                                    indeterminate={on > 0 && on < idx.length}
-                                    onChange={(e) => {
-                                      const v = e.currentTarget.checked
-                                      if (v) setMapPois(true)
-                                      setPicks((s) => ({ ...s, ...Object.fromEntries(idx.map((i) => [i, v])) }))
-                                    }}
-                                    aria-label={`Afficher tous les POI ${k.label}`}
-                                  />
-                                  {/* Clic sur l'en-tête : replier ou déplier la catégorie. */}
-                                  <Group
-                                    gap={8}
-                                    wrap="nowrap"
-                                    role="button"
-                                    tabIndex={0}
-                                    aria-expanded={!folded[k.kind]}
-                                    style={{ flex: 1, cursor: 'pointer', userSelect: 'none' }}
-                                    onClick={() => setFolded((s) => ({ ...s, [k.kind]: !s[k.kind] }))}
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter' || e.key === ' ') {
-                                        e.preventDefault()
-                                        setFolded((s) => ({ ...s, [k.kind]: !s[k.kind] }))
-                                      }
-                                    }}
-                                  >
-                                    <Text size="sm" fw={700} c="white" style={{ flex: 1 }}>
-                                      {k.label}
-                                    </Text>
-                                    <Text size="xs" c="white" opacity={0.85}>
-                                      {on}/{idx.length}
-                                    </Text>
-                                    <IconChevronDown
-                                      size={16}
-                                      color="white"
-                                      style={{ transition: 'transform 0.15s', transform: folded[k.kind] ? 'rotate(-90deg)' : 'none' }}
-                                    />
-                                  </Group>
-                                </Group>
-                                <Collapse in={!folded[k.kind]} transitionDuration={150}>
-                                  <Box pl={4}>{idx.map((i) => poiRow(t.pois[i], i))}</Box>
-                                </Collapse>
-                              </Box>
+                              <PoiCategory
+                                key={k.kind}
+                                kind={k.kind}
+                                count={`${on}/${idx.length}`}
+                                folded={!!folded[k.kind]}
+                                onFold={() => setFolded((s) => ({ ...s, [k.kind]: !s[k.kind] }))}
+                                check={{
+                                  checked: on === idx.length,
+                                  indeterminate: on > 0 && on < idx.length,
+                                  label: poiEditing ? `Sélectionner tous les POI ${k.label}` : `Afficher tous les POI ${k.label}`,
+                                  onChange: (v) => {
+                                    if (poiEditing) return setSel((s) => (v ? [...new Set([...s, ...idx])] : s.filter((x) => !idx.includes(x))))
+                                    if (v) setMapPois(true)
+                                    setPicks((s) => ({ ...s, ...Object.fromEntries(idx.map((i) => [i, v])) }))
+                                  },
+                                }}
+                              >
+                                {idx.map((i) => poiRow(t.pois[i], i))}
+                              </PoiCategory>
                             )
                           })}
                     </Stack>
@@ -620,6 +853,79 @@ export default function TracePage({
           </Paper>
         </Stack>
       </Group>
+      <Modal
+        opened={poiForm !== null}
+        onClose={() => setPoiForm(null)}
+        title={poiForm?.mode === 'add' ? 'Nouveau point d’intérêt' : 'Renommer le point d’intérêt'}
+      >
+        {poiForm && (
+          <form
+            onSubmit={(ev) => {
+              ev.preventDefault()
+              const f = poiForm
+              setPoiForm(null)
+              if (f.mode === 'add') runEdits([{ op: 'add', lat: f.lat, lon: f.lon, name: f.name.trim(), kind: f.kind }])
+              else runEdits([{ op: 'rename', ...at(t.pois[f.i]), newName: f.name.trim() }])
+            }}
+          >
+            <Stack gap="sm">
+              <TextInput
+                autoFocus
+                label="Nom"
+                value={poiForm.name}
+                onChange={(ev) => {
+                  const name = ev.currentTarget.value
+                  setPoiForm((f) => (f ? { ...f, name } : f))
+                }}
+              />
+              {poiForm.mode === 'add' && (
+                <Select
+                  label="Catégorie"
+                  allowDeselect={false}
+                  value={poiForm.kind}
+                  data={POI_KINDS.map((k) => ({ value: k.kind, label: k.label }))}
+                  onChange={(v) => v && setPoiForm((f) => (f && f.mode === 'add' ? { ...f, kind: v as PoiKind } : f))}
+                />
+              )}
+              <Group justify="flex-end">
+                <Button variant="default" onClick={() => setPoiForm(null)}>
+                  Annuler
+                </Button>
+                <Button type="submit" disabled={!poiForm.name.trim()}>
+                  {poiForm.mode === 'add' ? 'Ajouter' : 'Renommer'}
+                </Button>
+              </Group>
+            </Stack>
+          </form>
+        )}
+      </Modal>
+      <OsmPoiModal
+        traceId={t.id}
+        opened={osmOpen}
+        onClose={() => setOsmOpen(false)}
+        onAdd={(picked) => runEdits(picked.map((c) => ({ op: 'add' as const, lat: c.lat, lon: c.lon, name: c.name, kind: c.kind })))}
+      />
+      <Modal opened={confirmDelete} onClose={() => setConfirmDelete(false)} title="Supprimer des points d’intérêt">
+        <Stack gap="sm">
+          <Text size="sm">
+            {sel.length === 1 ? `« ${t.pois[sel[0]]?.name || 'sans nom'} » sera retiré` : `${sel.length} points d’intérêt seront retirés`} du fichier GPX.
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setConfirmDelete(false)}>
+              Annuler
+            </Button>
+            <Button
+              color="red"
+              onClick={() => {
+                setConfirmDelete(false)
+                runEdits(sel.map((i) => ({ op: 'delete' as const, ...at(t.pois[i]) })))
+              }}
+            >
+              Supprimer
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Stack>
   )
 }

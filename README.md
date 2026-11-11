@@ -1,4 +1,4 @@
-# Organisons, v0.7
+# Organisons, v0.8
 
 Application de bureau pour classer, filtrer et préparer ses traces GPX vélo, sur son PC et son NAS, dans l'esprit de Pédalons.
 Tauri 2 (cœur en Rust), React, Mantine et MapLibre. Interface en français, pour Windows (macOS prévu plus tard).
@@ -13,7 +13,7 @@ Tauri 2 (cœur en Rust), React, Mantine et MapLibre. Interface en français, pou
   - *gérée* : rangée selon un modèle de dossiers modifiable dans les Réglages (`{sport}/{année}/{nom}.gpx` par défaut, avec aussi `{mois}`, `{source}`, `{collection}`). Le rangement montre toujours un aperçu, et rien ne bouge avant validation.
 - **Quatre affichages** : tuiles avec fond de carte, liste + carte, liste, carte de toutes les traces.
 - **Filtres** : recherche, distance, dénivelé, relief, sport, direction du vent (±45° en option), source, tags, collection. Tri par date, distance, dénivelé, relief, nom (dans l'ordre des nombres : np#2 avant np#10) ou sport.
-- **Modification par lot** : sélectionner plusieurs traces pour ajouter ou retirer des tags, changer le sport, ajouter ou retirer des collections.
+- **Modification par lot** : sélectionner plusieurs traces pour ajouter ou retirer des tags, changer le sport, ajouter ou retirer des collections, ou les mettre à la corbeille (après confirmation).
 - **NAS éteint** : la bibliothèque reste consultable, et une relecture ne retire rien de l'index.
 
 ### Analyse de chaque trace
@@ -30,11 +30,17 @@ Tauri 2 (cœur en Rust), React, Mantine et MapLibre. Interface en français, pou
 - Profil coloré selon la pente la plus forte de chaque tronçon. Son curseur se suit sur la carte, et il suit le zoom de la carte.
 - **Revêtement** calculé depuis OpenStreetMap (tuiles vectorielles VersaTiles) : asphalte, pavés, stabilisé, chemin. Le profil et la carte sont colorés, avec la part de chaque type en km et en %.
 - Au survol d'une légende (pente ou revêtement), le type ressort et les autres s'atténuent.
-- Points d'intérêt affichés par catégorie (repliables) ou par km.
+- Points d'intérêt affichés par catégorie (repliables) ou par km. Le bouton ⋮ au bout d'un POI (ou sa pastille de couleur) change sa catégorie s'il est mal reconnu (pastille entourée quand elle est choisie, « Revenir à la catégorie détectée ») ; le choix tient à la relecture, sert à l'envoi au Karoo et va dans la sauvegarde.
+- **Modifier les POI** (bouton « Modifier » de la section Points d'intérêt, si la bibliothèque autorise l'écriture dans les GPX) : cocher des POI pour changer leur catégorie ou les supprimer ; ⋮ pour renommer, déplacer (clic sur la carte ou le profil) ou supprimer un POI ; « Ajouter un POI » puis un clic sur la carte (position exacte) ou le profil (point de la trace), avec un nom et une catégorie. Les modifications sont écrites dans le fichier GPX, vérifiées comme pour les tags.
+- **POI proposés depuis OpenStreetMap** (en mode édition des POI, « OpenStreetMap… ») : eau, toilettes et services, commerces, hébergements, curiosités le long de la trace. Pour chaque catégorie, « sur la trace » (30 m) ou à une distance au plus (100 m à 2 km), réglable pour une recherche ou gardé par défaut. Densité, commune à toutes les catégories mais comptée pour chacune à part : « Limiter à N proposition(s) par catégorie tous les X km » (les plus proches de la trace), appliquée tout de suite aux résultats ; et « Ne rien proposer avant le km X » (par exemple pour ne pas chercher de ravitaillement juste après le départ). On coche ceux à ajouter (km et détour indiqués) ; ils sont écrits dans le GPX. Données © contributeurs OpenStreetMap, par l'API Overpass (service public : une recherche peut demander un peu de patience).
 - **Renommer la trace** (crayon à côté du titre) : le nom reste en place aux relectures. Le fichier est renommé tout de suite : rangé selon le modèle dans une bibliothèque gérée, renommé dans son dossier dans une bibliothèque indexée qui autorise l’écriture ; le `<name>` du GPX change aussi dans ce cas. « Nom du fichier » reprend le nom écrit dans le GPX.
 - Classement en lecture ou en édition : sport, tags, collections, notes.
 - **Modifier dans gpx.studio** : la trace s'ouvre dans gpx.studio, dans le navigateur. Une fois exportée, Organisons propose de remplacer la trace (voir Connexions).
 - **Envoyer vers le Karoo** (Hammerhead), aussi pour une sélection de traces ou un tour.
+
+### Points d'intérêt
+
+- Onglet **POI** : les points d'intérêt de toutes les traces sur une carte et en liste, regroupés quand plusieurs traces passent au même endroit (même nom à moins de 60 m). Filtres par catégorie, recherche par nom de POI ou de trace, « Sur plusieurs traces » ; tri par nombre de traces, nom, catégorie ou trace. Un lieu choisi montre les traces qui y passent, avec le km ; un clic ouvre la fiche.
 
 ### Tags
 
@@ -102,6 +108,8 @@ Les autres appareils GPS sont à l’étude.
 
 Télécharger `Organisons_<version>_x64_fr-FR.msi` ou `Organisons_<version>_x64-setup.exe` sur la page [Releases](https://github.com/minicake1/organisons/releases), puis le lancer. L'appli s'installe dans `C:\Program Files\Organisons`. Elle utilise WebView2, déjà présent sur Windows 11. Les installateurs ne sont pas signés : Windows SmartScreen peut afficher un avertissement (« Informations complémentaires » → « Exécuter quand même »).
 
+**Mises à jour** (à partir de la v0.8) : au lancement, Organisons regarde si une nouvelle version est publiée et propose « Installer et redémarrer » ; « Plus tard » ne la repropose plus jusqu'à la suivante. Réglages → Mises à jour pour vérifier à la demande. Le paquet téléchargé est vérifié par la clé de mise à jour du projet avant l'installation ; Windows demande l'autorisation administrateur, comme pour la première installation.
+
 ### Depuis les sources
 
 1. Installer les prérequis de Tauri 2 : https://v2.tauri.app/start/prerequisites/
@@ -160,8 +168,8 @@ crates/traces-core/     cœur Rust sans interface, testé seul
   src/analyze.rs        distance, dénivelé, pente, vent, POI, profil
   src/index.rs          base SQLite : traces, tags, collections, tours, doublons, entraînements, réglages
   src/scan.rs           parcours des dossiers, empreinte SHA-256, tags et notes relus dans le GPX
-  src/gpxmeta.rs        écriture des tags et notes dans <extensions>, fichier inchangé par ailleurs
-  src/organize.rs       rangement, import, remplacement, doublons mis de côté, corbeille
+  src/gpxmeta.rs        écriture des tags, notes, nom et POI (<wpt>), fichier inchangé par ailleurs
+  src/organize.rs       rangement, import, remplacement, POI modifiés, doublons mis de côté, corbeille
   src/naming.rs         nom nettoyé, date du titre, identifiant Openrunner
   src/autotags.rs       tags proposés
   src/sport.rs          sport d'après le GPX ou le titre
@@ -170,12 +178,13 @@ crates/traces-core/     cœur Rust sans interface, testé seul
   src/workout.rs        séances .zwo
   src/device.rs         GPX préparé pour un appareil
   src/poi.rs            reconnaissance des POI d’après data/poi-equivalences.md
+  src/osm.rs            POI proposés depuis OpenStreetMap (requêtes Overpass, distance à la trace)
   tests/brm600.rs       tests sur une trace synthétique au format Openrunner (fixtures/boucle-600.gpx)
 src-tauri/src/          application Tauri : commandes (lib.rs), Komoot, Openrunner, Hammerhead,
-                        Zwift et intervals.icu (training.rs), gpx.studio et dossier surveillé,
-                        client HTTP commun
-src/                    interface React : pages Bibliothèque, Fiche, Tour, Collections, Tags,
-                        Doublons, Entraînements, Connexions, Corbeille, Réglages
+                        Zwift et intervals.icu (training.rs), Pédalons, gpx.studio et dossier surveillé,
+                        OpenStreetMap (osm.rs), client HTTP commun
+src/                    interface React : pages Bibliothèque, Fiche, Tour, Collections, POI, Tags,
+                        Agenda, Doublons, Entraînements, Connexions, Corbeille, Réglages
 scripts/build-public.mjs  installateurs à diffuser, vérifiés sans secret
 ```
 
@@ -193,13 +202,12 @@ Ces vérifications tournent aussi automatiquement sur GitHub (GitHub Actions, `.
 
 ## Feuille de route
 
-- **v0.8** : suivi des mises à jour, gestion plus approfondie des points d’intérêt.
 - **Autres appareils GPS** : à l’étude.
 - **Plus tard** : version macOS, éditeur intégré, fonds de carte sombres.
 
 ## Crédits
 
-Organisons v0.7, sous licence [GNU AGPL v3 ou ultérieure](LICENSE). Code source : [github.com/minicake1/organisons](https://github.com/minicake1/organisons). Les mêmes crédits sont dans l'appli, Réglages → À propos et crédits.
+Organisons v0.8, sous licence [GNU AGPL v3 ou ultérieure](LICENSE). Code source : [github.com/minicake1/organisons](https://github.com/minicake1/organisons). Les mêmes crédits sont dans l'appli, Réglages → À propos et crédits.
 
 ### Données cartographiques
 

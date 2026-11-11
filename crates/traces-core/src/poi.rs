@@ -43,7 +43,7 @@ pub struct PoiRules {
 }
 
 /// Minuscules, sans accents, apostrophes unifiées.
-fn normalize(s: &str) -> String {
+pub(crate) fn normalize(s: &str) -> String {
     s.to_lowercase()
         .chars()
         .map(|c| match c {

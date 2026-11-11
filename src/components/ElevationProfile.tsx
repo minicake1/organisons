@@ -21,6 +21,8 @@ interface Props {
   height?: number | string
   /** Partie affichée [km début, km fin] (suit le zoom de la carte) ; tout le profil sinon. */
   range?: [number, number] | null
+  /** Mode « placer un point » : un clic donne l'indice du point du profil. */
+  onPick?: (index: number) => void
 }
 
 /** Indice du point le plus proche d'un km (profil trié par km). */
@@ -40,7 +42,7 @@ export function indexAtKm(profile: ProfilePoint[], km: number): number {
  * couleur selon la pente la plus forte de chaque tronçon (ou le revêtement),
  * curseur partagé avec la carte, zoom calé sur la partie visible de la carte.
  */
-export default function ElevationProfile({ profile, pois, cursor, onCursor, colors, height = 200, range }: Props) {
+export default function ElevationProfile({ profile, pois, cursor, onCursor, colors, height = 200, range, onPick }: Props) {
   const { ref, width, height: h } = useElementSize()
   const W = Math.max(200, width)
   const H = Math.max(100, h)
@@ -112,11 +114,12 @@ export default function ElevationProfile({ profile, pois, cursor, onCursor, colo
   const curX = cur ? g.px(cur.km) : 0
   const shown = pois.filter((p) => p.km >= kmA && p.km <= kmB)
 
-  const onMove = (e: React.PointerEvent<HTMLDivElement>) => {
+  const indexAt = (e: React.PointerEvent<HTMLDivElement> | React.MouseEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect()
     const f = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width))
-    onCursor(indexAtKm(profile, kmA + f * (kmB - kmA)))
+    return indexAtKm(profile, kmA + f * (kmB - kmA))
   }
+  const onMove = (e: React.PointerEvent<HTMLDivElement>) => onCursor(indexAt(e))
 
   return (
     <div ref={ref} style={{ position: 'relative', height, minHeight: 100, overflow: 'hidden' }}>
@@ -200,6 +203,7 @@ export default function ElevationProfile({ profile, pois, cursor, onCursor, colo
         onPointerMove={onMove}
         onPointerDown={onMove}
         onPointerLeave={() => onCursor(null)}
+        onClick={onPick ? (e) => onPick(indexAt(e)) : undefined}
         style={{ position: 'absolute', left: X0, width: Math.max(0, X1 - X0), top: 0, height: Y_BASE, cursor: 'crosshair', touchAction: 'pan-y' }}
       />
 

@@ -41,7 +41,12 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Clé de mise à jour (secrets du dépôt) : signe les installateurs pour
+          # le suivi des mises à jour intégré ; latest.json est joint à la Release.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
+          args: --config src-tauri/tauri.release.conf.json
           tagName: ${{ github.ref_name }}
           releaseName: Organisons ${{ github.ref_name }}
           releaseDraft: true

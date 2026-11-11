@@ -14,6 +14,7 @@ pub mod index;
 pub mod model;
 pub mod naming;
 pub mod organize;
+pub mod osm;
 pub mod poi;
 pub mod scan;
 pub mod sport;

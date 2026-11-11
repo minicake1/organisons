@@ -10,6 +10,7 @@ mod hammerhead;
 mod http;
 mod komoot;
 mod openrunner;
+mod osm;
 mod pedalons;
 mod training;
 use traces_core::scan::{scan_library_shared, write_trace_meta};
@@ -471,6 +472,66 @@ fn set_workout_category(state: State<AppState>, id: i64, category: Option<String
     state.index.lock().map_err(err)?.set_workout_category(id, category.as_deref()).map_err(err)
 }
 
+/// Réglages des POI proposés depuis OpenStreetMap : règles par catégorie, densité.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OsmSettings {
+    rules: traces_core::osm::OsmRules,
+    density: Option<traces_core::osm::OsmDensity>,
+    /// Rien n'est proposé avant ce km (0 : dès le départ).
+    #[serde(default)]
+    start_km: f64,
+}
+
+#[tauri::command]
+fn osm_rules(state: State<AppState>) -> CmdResult<OsmSettings> {
+    let index = state.index.lock().map_err(err)?;
+    let saved = index.setting("osm_rules").map_err(err)?;
+    let density = index.setting("osm_density").map_err(err)?.and_then(|d| serde_json::from_str(&d).ok());
+    let start_km = index.setting("osm_start_km").map_err(err)?.and_then(|v| v.parse().ok()).unwrap_or(0.0);
+    Ok(OsmSettings { rules: traces_core::osm::with_defaults(saved.as_deref()), density, start_km })
+}
+
+/// Garde les réglages par défaut (ils vont dans la sauvegarde de la configuration).
+#[tauri::command]
+fn osm_rules_set(state: State<AppState>, settings: OsmSettings) -> CmdResult<()> {
+    let index = state.index.lock().map_err(err)?;
+    index.set_setting("osm_rules", &serde_json::to_string(&settings.rules).map_err(err)?).map_err(err)?;
+    index.set_setting("osm_start_km", &settings.start_km.max(0.0).to_string()).map_err(err)?;
+    match settings.density {
+        Some(d) => index.set_setting("osm_density", &serde_json::to_string(&d).map_err(err)?).map_err(err),
+        None => index.set_setting("osm_density", "").map_err(err),
+    }
+}
+
+/// POI d'OpenStreetMap le long d'une trace, selon les règles (avancement : « osm-progress »).
+#[tauri::command]
+async fn osm_search(app: tauri::AppHandle, trace_id: i64, rules: traces_core::osm::OsmRules) -> CmdResult<Vec<traces_core::osm::OsmCandidate>> {
+    blocking(move || {
+        let t = app.state::<AppState>().index.lock().map_err(err)?.get(trace_id).map_err(err)?;
+        let queries = traces_core::osm::queries(&t.profile, &rules);
+        let mut responses = Vec::new();
+        for (n, q) in queries.iter().enumerate() {
+            let _ = app.emit("osm-progress", KomootProgress { phase: "import", done: n, total: queries.len() });
+            responses.push(osm::fetch(q)?);
+        }
+        traces_core::osm::candidates(&responses, &t.profile, &rules, &t.pois)
+    })
+    .await
+}
+
+/// Vue d'ensemble : POI de toutes les traces, regroupés par lieu.
+#[tauri::command]
+async fn poi_places(app: tauri::AppHandle) -> CmdResult<Vec<traces_core::model::PoiPlace>> {
+    blocking(move || app.state::<AppState>().index.lock().map_err(err)?.poi_places().map_err(err)).await
+}
+
+/// Catégorie choisie pour un point d'intérêt (`null` : catégorie détectée).
+#[tauri::command]
+fn set_poi_kind(state: State<AppState>, trace_id: i64, idx: i64, kind: Option<traces_core::model::PoiKind>) -> CmdResult<()> {
+    state.index.lock().map_err(err)?.set_poi_kind(trace_id, idx, kind).map_err(err)
+}
+
 /// Entraînements déjà envoyés vers Hammerhead.
 #[tauri::command]
 fn workouts_sent(state: State<AppState>) -> CmdResult<Vec<i64>> {
@@ -566,14 +627,15 @@ async fn hammerhead_send(app: tauri::AppHandle, ids: Vec<i64>) -> CmdResult<Send
         let mut report = SendReport { sent: 0, updated: 0, errors: vec![] };
         for (n, id) in ids.iter().enumerate() {
             let _ = app.emit("hammerhead-progress", KomootProgress { phase: "import", done: n, total });
-            let (name, path, existing) = {
+            let (name, path, existing, kinds) = {
                 let state = app.state::<AppState>();
                 let index = state.index.lock().map_err(err)?;
                 let t = index.get(*id).map_err(err)?;
                 let existing = index.device_send(*id, "hammerhead").map_err(err)?.map(|s| s.0);
-                (t.summary.name, t.summary.path, existing)
+                let kinds = index.poi_kinds(*id).map_err(err)?;
+                (t.summary.name, t.summary.path, existing, kinds)
             };
-            let result = traces_core::device::hammerhead_gpx(std::path::Path::new(&path))
+            let result = traces_core::device::hammerhead_gpx(std::path::Path::new(&path), &kinds)
                 .map_err(|e| e.to_string())
                 .and_then(|gpx| hammerhead::send_route(&name, &gpx, existing.as_deref()));
             match result {
@@ -855,6 +917,17 @@ fn inbox_set_dir(state: State<AppState>, dir: String) -> CmdResult<()> {
 #[tauri::command]
 fn inbox_dismiss(state: State<AppState>, paths: Vec<String>) -> CmdResult<()> {
     gpxstudio::mark_done(&*state.index.lock().map_err(err)?, &paths)
+}
+
+/// Modifie les points d'intérêt d'une trace dans son GPX (ajout, nom, position, suppression), puis la relit.
+#[tauri::command]
+async fn edit_pois(app: tauri::AppHandle, trace_id: i64, edits: Vec<organize::PoiEdit>) -> CmdResult<()> {
+    blocking(move || {
+        let state = app.state::<AppState>();
+        let mut index = state.index.lock().map_err(err)?;
+        organize::edit_pois(&mut index, trace_id, &edits, now()).map_err(err)
+    })
+    .await
 }
 
 /// Remplace le GPX d'une trace par la version du dossier surveillé (l'ancienne part à la corbeille).
@@ -1200,6 +1273,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             let index = Index::open(&index_path(&dir))?;
@@ -1215,6 +1290,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_libraries,
             set_workout_category,
+            set_poi_kind,
+            poi_places,
+            osm_rules,
+            osm_rules_set,
+            osm_search,
+            edit_pois,
             pedalons_status,
             pedalons_login,
             pedalons_logout,

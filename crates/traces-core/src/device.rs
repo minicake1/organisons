@@ -5,8 +5,10 @@
 //! (Food, Water, Parking, Camping, Lodging, Geocache, Summit, Generic, Danger) ;
 //! et il nomme le parcours d'après le nom du fichier envoyé.
 
+use std::collections::HashMap;
 use std::path::Path;
 
+use crate::index::{poi_key, PoiKey};
 use crate::model::PoiKind;
 use crate::{Error, Result};
 
@@ -15,15 +17,20 @@ use crate::{Error, Result};
 
 /// GPX à envoyer au Karoo : la trace telle quelle, et les points d'intérêt avec
 /// un type et un symbole qu'il comprend (noms, descriptions et positions gardés).
-/// Le fichier d'origine n'est pas modifié.
-pub fn hammerhead_gpx(path: &Path) -> Result<Vec<u8>> {
+/// Le fichier d'origine n'est pas modifié. `kinds` : catégories choisies dans
+/// l'appli (`Index::poi_kinds`), prioritaires sur la reconnaissance.
+pub fn hammerhead_gpx(path: &Path, kinds: &HashMap<PoiKey, PoiKind>) -> Result<Vec<u8>> {
     let file = std::fs::File::open(path).map_err(|source| Error::Io { path: path.to_owned(), source })?;
     let mut gpx = gpx::read(std::io::BufReader::new(file))
         .map_err(|e| Error::Invalid(format!("{} : GPX illisible ({e})", path.display())))?;
     let rules = crate::poi::rules();
     for w in &mut gpx.waypoints {
         let name = w.name.clone().unwrap_or_default();
-        let kind = rules.classify(w.symbol.as_deref(), w.type_.as_deref(), &name);
+        let p = w.point();
+        let kind = match kinds.get(&poi_key(p.y(), p.x(), name.trim())) {
+            Some(k) => *k,
+            None => rules.classify(w.symbol.as_deref(), w.type_.as_deref(), &name),
+        };
         // Type Karoo précis quand le symbole d'origine en a un (Camping, Parking…).
         let t = rules.karoo_type(w.symbol.as_deref(), w.type_.as_deref(), kind).to_string();
         // Le Karoo n'a pas de type « contrôle » : le nom le dit.

@@ -7,6 +7,7 @@ import {
   IconBarbell,
   IconCopy,
   IconCalendar,
+  IconMapPin,
   IconFolder,
   IconPlugConnected,
   IconRoute,
@@ -26,7 +27,9 @@ import TrashPage from './pages/TrashPage'
 import TourPage from './pages/TourPage'
 import ConnectionsPage, { type ConnectionTab } from './pages/ConnectionsPage'
 import PedalonsPage from './pages/PedalonsPage'
+import PoisPage from './pages/PoisPage'
 import WorkoutsPage from './pages/WorkoutsPage'
+import { UpdateBanner } from './components/UpdatePanel'
 import InboxPanel from './components/InboxPanel'
 import { APP_VERSION } from './version'
 import { readUiPrefs } from './uiPrefs'
@@ -44,6 +47,7 @@ export type Route =
   | { page: 'connections'; tab: ConnectionTab }
   | { page: 'workouts' }
   | { page: 'agenda' }
+  | { page: 'pois' }
 
 export default function App() {
   // Historique des écrans visités (précédent / suivant), 50 au plus.
@@ -143,6 +147,7 @@ export default function App() {
             active={from === 'collections' || from === 'collection' || from === 'tour'}
             onClick={() => go({ page: 'collections' })}
           />
+          <NavLink label="POI" leftSection={<IconMapPin size={18} />} active={from === 'pois'} onClick={() => go({ page: 'pois' })} />
           <NavLink label="Tags" leftSection={<IconTag size={18} />} active={from === 'tags'} onClick={() => go({ page: 'tags' })} />
           <NavLink label="Agenda" leftSection={<IconCalendar size={18} />} active={route.page === 'agenda'} onClick={() => go({ page: 'agenda' })} />
           <NavLink
@@ -193,6 +198,7 @@ export default function App() {
         </Stack>
       </AppShell.Navbar>
       <AppShell.Main>
+        <UpdateBanner />
         {/* GPX arrivés dans le dossier surveillé (retour de gpx.studio…) ; la fiche a le sien. */}
         {route.page === "library" && <InboxPanel onOpen={open} />}
         {route.page === 'library' && (
@@ -209,6 +215,7 @@ export default function App() {
           />
         )}
         {route.page === 'workouts' && <WorkoutsPage />}
+        {route.page === 'pois' && <PoisPage onOpen={open} />}
         {route.page === 'agenda' && (
           <Stack gap="md">
             <Title order={2}>Agenda</Title>
@@ -249,6 +256,8 @@ function backLabel(r: Route): string {
       return 'Collection'
     case 'collections':
       return 'Collections'
+    case 'pois':
+      return 'POI'
     default:
       return 'Bibliothèque'
   }

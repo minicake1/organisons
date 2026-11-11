@@ -77,6 +77,9 @@ pub struct TraceBackup {
     pub notes: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags_ignored: Vec<String>,
+    /// Catégories choisies pour des POI : latitude et longitude en micro-degrés, nom, catégorie.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub poi_kinds: Vec<(i64, i64, String, String)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -172,6 +175,7 @@ pub fn export(index: &Index, app: &str, ui: BTreeMap<String, String>, now: i64) 
     }
 
     let mut traces = Vec::new();
+    let mut kinds_st = c.prepare("SELECT lat_e6, lon_e6, name, kind FROM poi_kinds WHERE trace_id = ?1 ORDER BY lat_e6, lon_e6, name")?;
     let mut st = c.prepare(
         "SELECT id, name_user, sport_user, notes, tags_ignored,
                 (SELECT json_group_array(tag) FROM (SELECT tag FROM tags WHERE trace_id = traces.id ORDER BY tag))
@@ -198,8 +202,11 @@ pub fn export(index: &Index, app: &str, ui: BTreeMap<String, String>, now: i64) 
             tags: json_list(&tags.unwrap_or_default()),
             notes,
             tags_ignored: json_list(&ignored),
+            poi_kinds: kinds_st
+                .query_map([id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+                .collect::<std::result::Result<_, _>>()?,
         };
-        let useful = t.name.is_some() || t.sport.is_some() || !t.tags.is_empty() || !t.notes.trim().is_empty() || !t.tags_ignored.is_empty();
+        let useful = t.name.is_some() || t.sport.is_some() || !t.tags.is_empty() || !t.notes.trim().is_empty() || !t.tags_ignored.is_empty() || !t.poi_kinds.is_empty();
         if useful {
             traces.push(t);
         }
@@ -425,6 +432,13 @@ pub fn restore_data(index: &Index, b: &Backup) -> Result<RestoreReport> {
             for tag in &t.tags {
                 tx.execute("INSERT OR IGNORE INTO tags(trace_id, tag) VALUES (?1, ?2)", params![id, tag])?;
             }
+        }
+        for (lat, lon, name, kind) in &t.poi_kinds {
+            tx.execute(
+                "INSERT INTO poi_kinds(trace_id, lat_e6, lon_e6, name, kind) VALUES (?1,?2,?3,?4,?5)
+                 ON CONFLICT(trace_id, lat_e6, lon_e6, name) DO UPDATE SET kind = excluded.kind",
+                params![id, lat, lon, name, crate::model::PoiKind::parse(kind).as_str()],
+            )?;
         }
         rep.traces_restored += 1;
     }
