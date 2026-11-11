@@ -1,4 +1,4 @@
-# Organisons, v0.6
+# Organisons, v0.7
 
 Application de bureau pour classer, filtrer et préparer ses traces GPX vélo, sur son PC et son NAS, dans l'esprit de Pédalons.
 Tauri 2 (cœur en Rust), React, Mantine et MapLibre. Interface en français, pour Windows (macOS prévu plus tard).
@@ -100,7 +100,7 @@ Les autres appareils GPS sont à l’étude.
 
 ### Avec l'installateur (Windows)
 
-Télécharger `Organisons_<version>_x64_fr-FR.msi` ou `Organisons_<version>_x64-setup.exe` sur la page [Releases](https://github.com/minicake1/organisons/releases), puis le lancer. L'appli s'installe dans `C:Program FilesOrganisons`. Elle utilise WebView2, déjà présent sur Windows 11. Les installateurs ne sont pas signés : Windows SmartScreen peut afficher un avertissement (« Informations complémentaires » → « Exécuter quand même »).
+Télécharger `Organisons_<version>_x64_fr-FR.msi` ou `Organisons_<version>_x64-setup.exe` sur la page [Releases](https://github.com/minicake1/organisons/releases), puis le lancer. L'appli s'installe dans `C:\Program Files\Organisons`. Elle utilise WebView2, déjà présent sur Windows 11. Les installateurs ne sont pas signés : Windows SmartScreen peut afficher un avertissement (« Informations complémentaires » → « Exécuter quand même »).
 
 ### Depuis les sources
 
@@ -199,7 +199,7 @@ Ces vérifications tournent aussi automatiquement sur GitHub (GitHub Actions, `.
 
 ## Crédits
 
-Organisons v0.6, sous licence [GNU AGPL v3 ou ultérieure](LICENSE). Code source : [github.com/minicake1/organisons](https://github.com/minicake1/organisons). Les mêmes crédits sont dans l'appli, Réglages → À propos et crédits.
+Organisons v0.7, sous licence [GNU AGPL v3 ou ultérieure](LICENSE). Code source : [github.com/minicake1/organisons](https://github.com/minicake1/organisons). Les mêmes crédits sont dans l'appli, Réglages → À propos et crédits.
 
 ### Données cartographiques
 
