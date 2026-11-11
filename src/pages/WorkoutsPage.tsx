@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Badge, Box, Button, Card, Group, Menu, Modal, Paper, Select, Stack, Text, TextInput, Title, Tooltip } from '@mantine/core'
 import { IconChevronDown, IconFileImport, IconSearch } from '@tabler/icons-react'
 import { open } from '@tauri-apps/plugin-dialog'
-import { api, type Library, type WorkoutSummary } from '../api'
+import { api, type Library, type WorkoutCategory, type WorkoutSummary } from '../api'
+import { WORKOUT_CATEGORIES, workoutCategory } from '../labels'
 import WorkoutChart, { ZONES } from '../components/WorkoutChart'
 import WorkoutDetail from '../components/WorkoutDetail'
 import WorkoutSendMenu from '../components/WorkoutSendMenu'
@@ -25,6 +26,7 @@ export default function WorkoutsPage() {
   const [libraries, setLibraries] = useState<Library[]>([])
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<Sort>('recent')
+  const [category, setCategory] = useState<string | null>(null)
   const [shown, setShown] = useState<WorkoutSummary | null>(null)
   const [sent, setSent] = useState<number[]>([])
   const [busy, setBusy] = useState<number | 'import' | null>(null)
@@ -41,6 +43,17 @@ export default function WorkoutsPage() {
       .then(setSent)
       .catch(() => {})
   }
+  // Catégorie choisie (null : retour à la catégorie détectée) ; la fiche ouverte suit.
+  const changeCategory = (w: WorkoutSummary, c: WorkoutCategory | null) =>
+    api
+      .setWorkoutCategory(w.id, c)
+      .then(() => api.listWorkouts())
+      .then((all) => {
+        setList(all)
+        setShown(all.find((x) => x.id === w.id) ?? null)
+      })
+      .catch((e) => setError(String(e)))
+
   useEffect(() => {
     refresh()
     api
@@ -51,7 +64,9 @@ export default function WorkoutsPage() {
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
-    const out = (list ?? []).filter((w) => !q || w.name.toLowerCase().includes(q) || w.tags.some((t) => t.toLowerCase().includes(q)))
+    const out = (list ?? []).filter(
+      (w) => (!category || w.category === category) && (!q || w.name.toLowerCase().includes(q) || w.tags.some((t) => t.toLowerCase().includes(q))),
+    )
     const by: Record<Sort, (a: WorkoutSummary, b: WorkoutSummary) => number> = {
       recent: (a, b) => b.addedAt - a.addedAt,
       name: (a, b) => a.name.localeCompare(b.name, 'fr', { numeric: true }),
@@ -59,7 +74,7 @@ export default function WorkoutsPage() {
       tss: (a, b) => b.tss - a.tss,
     }
     return [...out].sort(by[sort])
-  }, [list, query, sort])
+  }, [list, query, sort, category])
 
   const importInto = async (l: Library) => {
     const picked = await open({ multiple: true, title: `Importer des séances dans « ${l.name} »`, filters: [{ name: 'Séances Zwift', extensions: ['zwo', 'ZWO'] }] })
@@ -124,6 +139,18 @@ export default function WorkoutsPage() {
           style={{ flex: 1, maxWidth: 420 }}
         />
         <Select
+          w={200}
+          aria-label="Catégorie"
+          placeholder="Toutes les catégories"
+          clearable
+          value={category}
+          onChange={setCategory}
+          data={WORKOUT_CATEGORIES.filter((c) => (list ?? []).some((w) => w.category === c.value)).map((c) => ({
+            value: c.value,
+            label: `${c.label} (${(list ?? []).filter((w) => w.category === c.value).length})`,
+          }))}
+        />
+        <Select
           w={220}
           aria-label="Trier"
           allowDeselect={false}
@@ -185,9 +212,14 @@ export default function WorkoutsPage() {
                 </Text>
               </Group>
               <Group gap={6}>
-                <Badge size="sm" variant="light" color={w.sport === 'run' ? 'orange' : 'indigo'}>
-                  {w.sport === 'run' ? 'Course' : 'Vélo'}
+                <Badge size="sm" variant="light" color={workoutCategory(w.category).color}>
+                  {workoutCategory(w.category).label}
                 </Badge>
+                {w.sport === 'run' && (
+                  <Badge size="sm" variant="light" color="orange">
+                    Course
+                  </Badge>
+                )}
                 {w.tags.slice(0, 3).map((t) => (
                   <Badge key={t} size="sm" variant="light" color="gray" tt="none">
                     {t}
@@ -221,6 +253,22 @@ export default function WorkoutsPage() {
                 <Text size="sm" c="dimmed">
                   Auteur : {shown.author}
                 </Text>
+              )}
+              <Select
+                size="xs"
+                w={190}
+                aria-label="Catégorie de la séance"
+                value={shown.category}
+                allowDeselect={false}
+                data={WORKOUT_CATEGORIES.map((c) => ({ value: c.value, label: c.label }))}
+                onChange={(v) => v && changeCategory(shown, v as WorkoutCategory)}
+              />
+              {shown.categoryUser && (
+                <Tooltip label="Revenir à la catégorie détectée (nom, catégorie Zwift du fichier ou profil de puissance)">
+                  <Button size="compact-xs" variant="subtle" color="gray" onClick={() => changeCategory(shown, null)}>
+                    Détectée
+                  </Button>
+                </Tooltip>
               )}
               <Group ml="auto">
                 <WorkoutSendMenu

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AppShell, Badge, Group, NavLink, Stack, Text, ThemeIcon } from '@mantine/core'
+import { AppShell, Badge, Group, NavLink, Stack, Text, ThemeIcon, Title } from '@mantine/core'
 import {
 
 
   IconBuildingBroadcastTower,
   IconBarbell,
   IconCopy,
+  IconCalendar,
   IconFolder,
   IconPlugConnected,
   IconRoute,
@@ -24,6 +25,7 @@ import DuplicatesPage from './pages/DuplicatesPage'
 import TrashPage from './pages/TrashPage'
 import TourPage from './pages/TourPage'
 import ConnectionsPage, { type ConnectionTab } from './pages/ConnectionsPage'
+import PedalonsPage from './pages/PedalonsPage'
 import WorkoutsPage from './pages/WorkoutsPage'
 import InboxPanel from './components/InboxPanel'
 import { APP_VERSION } from './version'
@@ -41,6 +43,7 @@ export type Route =
   | { page: 'tour'; id: number }
   | { page: 'connections'; tab: ConnectionTab }
   | { page: 'workouts' }
+  | { page: 'agenda' }
 
 export default function App() {
   // Historique des écrans visités (précédent / suivant), 50 au plus.
@@ -141,6 +144,7 @@ export default function App() {
             onClick={() => go({ page: 'collections' })}
           />
           <NavLink label="Tags" leftSection={<IconTag size={18} />} active={from === 'tags'} onClick={() => go({ page: 'tags' })} />
+          <NavLink label="Agenda" leftSection={<IconCalendar size={18} />} active={route.page === 'agenda'} onClick={() => go({ page: 'agenda' })} />
           <NavLink
             label="Doublons"
             leftSection={<IconCopy size={18} />}
@@ -158,7 +162,7 @@ export default function App() {
             label="Connexions"
             leftSection={<IconPlugConnected size={18} />}
             active={route.page === 'connections'}
-            onClick={() => go({ page: 'connections', tab: 'komoot' })}
+            onClick={() => go({ page: 'connections', tab: 'pedalons' })}
           />
           <NavLink
             mt="auto"
@@ -201,9 +205,16 @@ export default function App() {
             tab={route.tab}
             onTab={(tab) => setNav((n) => ({ ...n, stack: n.stack.map((r, i) => (i === n.i ? { page: 'connections', tab } : r)) }))}
             onLibrary={() => go({ page: 'library' })}
+            onAgenda={() => go({ page: 'agenda' })}
           />
         )}
         {route.page === 'workouts' && <WorkoutsPage />}
+        {route.page === 'agenda' && (
+          <Stack gap="md">
+            <Title order={2}>Agenda</Title>
+            <PedalonsPage mode="agenda" onLibrary={() => go({ page: 'library' })} onSwitch={() => go({ page: 'connections', tab: 'pedalons' })} />
+          </Stack>
+        )}
         {route.page === 'trash' && (
           // Trace restaurée : elle est de retour dans la Bibliothèque, on l’ouvre depuis là.
           <TrashPage onOpen={(id) => go({ page: 'trace', id, back: { page: 'library' } })} onChanged={countTrash} />

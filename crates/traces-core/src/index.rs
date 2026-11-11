@@ -212,6 +212,8 @@ impl Index {
             ("tag_names", "keywords", "TEXT NOT NULL DEFAULT '[]'"),
             ("collections", "is_tour", "INTEGER NOT NULL DEFAULT 0"),
             ("collection_traces", "position", "INTEGER NOT NULL DEFAULT 0"),
+            ("workouts", "category", "TEXT NOT NULL DEFAULT ''"),
+            ("workouts", "category_user", "TEXT"),
         ] {
             let exists: bool = self.conn.query_row(
                 &format!("SELECT COUNT(*) > 0 FROM pragma_table_info('{table}') WHERE name = ?1"),
@@ -1043,6 +1045,8 @@ pub(crate) struct RouteKey {
     pub elevation_gain: f64,
     pub start: Option<[f64; 2]>,
     pub end: Option<[f64; 2]>,
+    /// Vent idéal : il dit le sens du parcours (une boucle à l’envers a le vent opposé).
+    pub wind: Option<WindDirection>,
 }
 
 impl RouteKey {
@@ -1052,11 +1056,13 @@ impl RouteKey {
             elevation_gain: t.elevation_gain,
             start: t.preview.first().copied(),
             end: t.preview.last().copied(),
+            wind: Some(t.wind),
         }
     }
 }
 
-/// Même parcours probable : distance ±1 %, D+ ±5 % (ou 30 m), départ et arrivée à moins de 300 m.
+/// Même parcours probable : distance ±1 %, D+ ±5 % (ou 30 m), départ et arrivée à moins de 300 m,
+/// et même sens : vents idéaux à 45° au plus (une boucle parcourue à l’envers n’est pas un doublon).
 pub(crate) fn similar_routes(a: &RouteKey, b: &RouteKey) -> bool {
     let near = |x: Option<[f64; 2]>, y: Option<[f64; 2]>| match (x, y) {
         (Some(x), Some(y)) => crate::geo::haversine_km(x[0], x[1], y[0], y[1]) < 0.3,
@@ -1066,6 +1072,10 @@ pub(crate) fn similar_routes(a: &RouteKey, b: &RouteKey) -> bool {
         && (a.elevation_gain - b.elevation_gain).abs() <= (0.05 * a.elevation_gain.max(b.elevation_gain)).max(30.0)
         && near(a.start, b.start)
         && near(a.end, b.end)
+        && match (a.wind, b.wind) {
+            (Some(x), Some(y)) => x.diff(y) <= 45.0,
+            _ => true,
+        }
 }
 
 impl Index {
@@ -1409,13 +1419,13 @@ impl Index {
     ) -> Result<i64> {
         self.conn.execute(
             "INSERT INTO workouts(library_id, path, file_size, file_mtime, name, author, description, sport, tags_json,
-                                  duration, intensity, tss, blocks_json, added_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                                  duration, intensity, tss, blocks_json, added_at, category)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
              ON CONFLICT(path) DO UPDATE SET library_id = excluded.library_id, file_size = excluded.file_size,
                file_mtime = excluded.file_mtime, name = excluded.name, author = excluded.author,
                description = excluded.description, sport = excluded.sport, tags_json = excluded.tags_json,
                duration = excluded.duration, intensity = excluded.intensity, tss = excluded.tss,
-               blocks_json = excluded.blocks_json",
+               blocks_json = excluded.blocks_json, category = excluded.category",
             params![
                 library_id,
                 path,
@@ -1430,7 +1440,8 @@ impl Index {
                 w.intensity,
                 w.tss,
                 serde_json::to_string(&w.blocks)?,
-                now
+                now,
+                w.category
             ],
         )?;
         Ok(self.conn.query_row("SELECT id FROM workouts WHERE path = ?1", [path], |r| r.get(0))?)
@@ -1460,47 +1471,60 @@ impl Index {
     fn query_workouts(&self, filter: &str, args: impl rusqlite::Params) -> Result<Vec<WorkoutSummary>> {
         let mut st = self.conn.prepare(&format!(
             "SELECT id, library_id, path, name, author, description, sport, tags_json, duration, intensity, tss,
-                    blocks_json, added_at FROM workouts {filter} ORDER BY added_at DESC, name COLLATE NATUREL"
+                    blocks_json, added_at, category, category_user FROM workouts {filter} ORDER BY added_at DESC, name COLLATE NATUREL"
         ))?;
         let rows = st.query_map(args, |r| {
             Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, i64>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, String>(4)?,
-                r.get::<_, String>(5)?,
-                r.get::<_, String>(6)?,
-                r.get::<_, String>(7)?,
-                r.get::<_, u32>(8)?,
-                r.get::<_, f64>(9)?,
-                r.get::<_, f64>(10)?,
-                r.get::<_, String>(11)?,
-                r.get::<_, i64>(12)?,
+                (r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?),
+                (r.get::<_, String>(3)?, r.get::<_, String>(4)?, r.get::<_, String>(5)?, r.get::<_, String>(6)?, r.get::<_, String>(7)?),
+                (r.get::<_, u32>(8)?, r.get::<_, f64>(9)?, r.get::<_, f64>(10)?, r.get::<_, String>(11)?, r.get::<_, i64>(12)?),
+                (r.get::<_, String>(13)?, r.get::<_, Option<String>>(14)?),
             ))
         })?;
         let mut out = Vec::new();
         for row in rows {
-            let (id, library_id, path, name, author, description, sport, tags, duration, intensity, tss, blocks, added_at) = row?;
+            let ((id, library_id, path), (name, author, description, sport, tags), (duration, intensity, tss, blocks, added_at), (category, category_user)) =
+                row?;
+            let tags: Vec<String> = serde_json::from_str(&tags).unwrap_or_default();
+            let blocks: Vec<crate::workout::Block> = serde_json::from_str(&blocks).unwrap_or_default();
+            // Catégorie : celle choisie, sinon celle détectée (calculée ici pour les séances indexées avant la v0.7).
+            let detected = if category.is_empty() {
+                crate::workout::infer_category(&name, None, &tags, &blocks, intensity).to_string()
+            } else {
+                category
+            };
             out.push(WorkoutSummary {
                 id,
                 library_id,
                 path,
+                category_user: category_user.clone(),
                 workout: crate::workout::Workout {
                     name,
                     author,
                     description,
                     sport,
-                    tags: serde_json::from_str(&tags).unwrap_or_default(),
+                    tags,
                     duration,
                     intensity,
                     tss,
-                    blocks: serde_json::from_str(&blocks).unwrap_or_default(),
+                    blocks,
+                    category: category_user.unwrap_or(detected),
                 },
                 added_at,
             });
         }
         Ok(out)
+    }
+
+    /// Catégorie choisie pour une séance (`None` : retour à la catégorie détectée).
+    pub fn set_workout_category(&self, id: i64, category: Option<&str>) -> Result<()> {
+        if let Some(c) = category {
+            if !crate::workout::CATEGORIES.contains(&c) {
+                return Err(Error::Invalid(format!("Catégorie de séance inconnue : {c}")));
+            }
+        }
+        self.conn.execute("UPDATE workouts SET category_user = ?2 WHERE id = ?1", params![id, category])?;
+        Ok(())
     }
 
     pub fn workout(&self, id: i64) -> Result<WorkoutSummary> {
@@ -1534,5 +1558,25 @@ impl Index {
         let mut st = self.conn.prepare("SELECT workout_id FROM workout_sends WHERE service = ?1")?;
         let ids = st.query_map([service], |r| r.get(0))?.collect::<std::result::Result<_, _>>()?;
         Ok(ids)
+    }
+}
+
+#[cfg(test)]
+mod doublons_probables {
+    use super::{similar_routes, RouteKey};
+    use crate::model::WindDirection;
+
+    fn boucle(wind: WindDirection) -> RouteKey {
+        RouteKey { distance_km: 100.0, elevation_gain: 800.0, start: Some([47.2, -1.5]), end: Some([47.2, -1.5]), wind: Some(wind) }
+    }
+
+    #[test]
+    fn sens_du_parcours() {
+        assert!(similar_routes(&boucle(WindDirection::N), &boucle(WindDirection::N)));
+        // Vent voisin (45°) : même sens, petites différences de tracé.
+        assert!(similar_routes(&boucle(WindDirection::N), &boucle(WindDirection::NE)));
+        // Boucle à l'envers : vent idéal opposé, pas un doublon.
+        assert!(!similar_routes(&boucle(WindDirection::N), &boucle(WindDirection::S)));
+        assert!(!similar_routes(&boucle(WindDirection::N), &boucle(WindDirection::E)));
     }
 }

@@ -647,6 +647,7 @@ pub fn check_import_with(
             elevation_gain: analysis.elevation_gain,
             start: analysis.profile.first().map(|p| [p.lat, p.lon]),
             end: analysis.profile.last().map(|p| [p.lat, p.lon]),
+            wind: Some(analysis.wind),
         };
         let (status, matches) = if !same_file.is_empty() {
             ("identical", same_file)

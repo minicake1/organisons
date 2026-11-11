@@ -10,6 +10,7 @@ mod hammerhead;
 mod http;
 mod komoot;
 mod openrunner;
+mod pedalons;
 mod training;
 use traces_core::scan::{scan_library_shared, write_trace_meta};
 use traces_core::{
@@ -294,7 +295,7 @@ async fn komoot_import(app: tauri::AppHandle, library_id: i64, ids: Vec<String>)
                 Ok(()) => {
                     let state = app.state::<AppState>();
                     let mut index = state.index.lock().map_err(err)?;
-                    import_one(&mut index, &lib, &path, "komoot", id, &mut existing, &mut report)?;
+                    import_one(&mut index, &lib, &path, "komoot", id, &mut existing, &mut report, false)?;
                 }
             }
             let _ = app.emit("komoot-progress", KomootProgress { phase: "import", done: n + 1, total });
@@ -317,12 +318,18 @@ fn import_one(
     external_id: &str,
     existing: &mut Vec<TraceSummary>,
     report: &mut OrganizeReport,
+    force: bool,
 ) -> CmdResult<()> {
     let file = path.to_string_lossy().to_string();
     let check = organize::check_import_against(index, std::slice::from_ref(&file), existing).map_err(err)?.into_iter().next();
     match check {
-        Some(c) if c.status == "identical" || c.status == "probable" => {
-            report.skipped.push(format!("{} : déjà présent ({})", c.name, c.matches.join(", ")));
+        // Même fichier : toujours ignoré. Même parcours probable : ignoré, sauf « importer quand même ».
+        Some(c) if c.status == "identical" || (c.status == "probable" && !force) => {
+            report.skipped.push(if c.status == "identical" {
+                format!("« {} » : fichier identique déjà présent ({})", c.name, c.matches.join(", "))
+            } else {
+                format!("« {} » ressemble à : {}", c.name, c.matches.join(", "))
+            });
             index.mark_external_import(source, external_id, "", now()).map_err(err)?;
         }
         _ => {
@@ -378,7 +385,7 @@ async fn openrunner_import(app: tauri::AppHandle, library_id: i64, links: Vec<St
             }
             let state = app.state::<AppState>();
             let mut index = state.index.lock().map_err(err)?;
-            import_one(&mut index, &lib, &path, "openrunner", &id, &mut existing, &mut report)?;
+            import_one(&mut index, &lib, &path, "openrunner", &id, &mut existing, &mut report, false)?;
         }
         let _ = app.emit("openrunner-progress", KomootProgress { phase: "import", done: total, total });
         Ok(report)
@@ -456,6 +463,12 @@ async fn icu_plan(app: tauri::AppHandle, ids: Vec<i64>, date: String) -> CmdResu
     })
     .await
     .map_err(err)?
+}
+
+/// Catégorie choisie pour une séance (`null` : catégorie détectée).
+#[tauri::command]
+fn set_workout_category(state: State<AppState>, id: i64, category: Option<String>) -> CmdResult<()> {
+    state.index.lock().map_err(err)?.set_workout_category(id, category.as_deref()).map_err(err)
 }
 
 /// Entraînements déjà envoyés vers Hammerhead.
@@ -1066,7 +1079,7 @@ struct AutoBackup {
 fn auto_backup_status(index: &Index) -> AutoBackup {
     AutoBackup {
         dir: index.setting("backup_dir").ok().flatten().unwrap_or_default(),
-        keep: index.setting("backup_keep").ok().flatten().and_then(|v| v.parse().ok()).unwrap_or(10),
+        keep: index.setting("backup_keep").ok().flatten().and_then(|v| v.parse().ok()).unwrap_or(3),
         last: index.setting("last_backup").ok().flatten().and_then(|v| v.parse().ok()),
     }
 }
@@ -1109,6 +1122,79 @@ async fn backup_auto_now(app: tauri::AppHandle) -> CmdResult<Option<String>> {
     blocking(move || auto_backup(&app.state::<AppState>().index, true)).await
 }
 
+// ---- Agenda Pédalons -------------------------------------------------------
+
+#[tauri::command]
+fn pedalons_status() -> Option<pedalons::AccountInfo> {
+    pedalons::status()
+}
+
+/// Connexion à Pédalons : le mot de passe n'est utilisé qu'une fois.
+#[tauri::command]
+async fn pedalons_login(email: String, password: String) -> CmdResult<pedalons::AccountInfo> {
+    blocking(move || pedalons::login(&email, &password)).await
+}
+
+#[tauri::command]
+fn pedalons_logout() -> CmdResult<()> {
+    pedalons::logout()
+}
+
+/// Sorties et étapes des équipes, de `from` à `to` (AAAA-MM-JJ), avec celles déjà importées.
+#[tauri::command]
+async fn pedalons_events(app: tauri::AppHandle, from: String, to: String) -> CmdResult<Vec<pedalons::Event>> {
+    blocking(move || {
+        let mut events = pedalons::events(&from, &to)?;
+        let done = app.state::<AppState>().index.lock().map_err(err)?.external_imports("pedalons").map_err(err)?;
+        for e in &mut events {
+            e.imported = done.contains(&e.id);
+        }
+        Ok(events)
+    })
+    .await
+}
+
+/// Importe les parcours de sorties Pédalons dans une bibliothèque gérée, avec
+/// l’avancement (« pedalons-progress »). Un parcours déjà présent est ignoré.
+#[tauri::command]
+async fn pedalons_import(app: tauri::AppHandle, library_id: i64, events: Vec<pedalons::Event>, force: Option<bool>) -> CmdResult<OrganizeReport> {
+    let force = force.unwrap_or(false);
+    let dir = app.path().app_cache_dir().map_err(err)?.join("pedalons");
+    std::fs::create_dir_all(&dir).map_err(err)?;
+    blocking(move || {
+        let (lib, mut existing) = {
+            let state = app.state::<AppState>();
+            let index = state.index.lock().map_err(err)?;
+            (index.library(library_id).map_err(err)?, index.list(&TraceFilter::default()).map_err(err)?)
+        };
+        let total = events.len();
+        let mut report = OrganizeReport::default();
+        for (n, e) in events.iter().enumerate() {
+            let _ = app.emit("pedalons-progress", KomootProgress { phase: "import", done: n, total });
+            let routes = match pedalons::routes(e) {
+                Ok(r) => r,
+                Err(msg) => {
+                    report.errors.push(msg);
+                    continue;
+                }
+            };
+            for (i, (route, label)) in routes.iter().enumerate() {
+                let path = dir.join(format!("{}-{i}.gpx", e.id));
+                if let Err(msg) = pedalons::download(&e.team_slug, route, &path) {
+                    report.errors.push(format!("{label} : {msg}"));
+                    continue;
+                }
+                let state = app.state::<AppState>();
+                let mut index = state.index.lock().map_err(err)?;
+                import_one(&mut index, &lib, &path, "pedalons", &e.id, &mut existing, &mut report, force)?;
+            }
+        }
+        let _ = app.emit("pedalons-progress", KomootProgress { phase: "import", done: total, total });
+        Ok(report)
+    })
+    .await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1128,6 +1214,12 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_libraries,
+            set_workout_category,
+            pedalons_status,
+            pedalons_login,
+            pedalons_logout,
+            pedalons_events,
+            pedalons_import,
             ui_prefs_sync,
             backup_export,
             backup_preview,

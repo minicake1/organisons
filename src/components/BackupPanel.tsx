@@ -82,7 +82,7 @@ export default function BackupPanel() {
       const dir = await open({ directory: true, title: 'Dossier des sauvegardes automatiques (par exemple sur le NAS)' })
       if (typeof dir !== 'string') return
       await api.uiPrefsSync(readUiPrefs())
-      setAuto(await api.backupAutoSet(dir, auto?.keep ?? 10))
+      setAuto(await api.backupAutoSet(dir, auto?.keep ?? 3))
       const file = await api.backupAutoNow()
       setAuto(await api.backupAutoGet())
       return file ? `Première sauvegarde automatique : ${file}` : undefined
@@ -111,7 +111,7 @@ export default function BackupPanel() {
           <Switch
             label="Sauvegarde automatique, une fois par jour au lancement"
             checked={!!auto?.dir}
-            onChange={(e) => (e.currentTarget.checked ? chooseAutoDir() : saveAuto('', auto?.keep ?? 10))}
+            onChange={(e) => (e.currentTarget.checked ? chooseAutoDir() : saveAuto('', auto?.keep ?? 3))}
           />
           {auto?.dir && (
             <Group align="flex-end">

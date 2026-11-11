@@ -122,6 +122,9 @@ pub struct Backup {
     /// Envois de séances, par chemin du .zwo.
     #[serde(default)]
     pub workout_sends: Vec<(String, SendBackup)>,
+    /// Catégories choisies pour les séances, par chemin du .zwo.
+    #[serde(default)]
+    pub workout_categories: Vec<(String, String)>,
 }
 
 fn json_list(s: &str) -> Vec<String> {
@@ -238,6 +241,11 @@ pub fn export(index: &Index, app: &str, ui: BTreeMap<String, String>, now: i64) 
         workout_sends.push(row?);
     }
 
+    let mut workout_categories = Vec::new();
+    let mut st = c.prepare("SELECT path, category_user FROM workouts WHERE category_user IS NOT NULL ORDER BY path")?;
+    for row in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+        workout_categories.push(row?);
+    }
     Ok(Backup {
         format: FORMAT.into(),
         version: VERSION,
@@ -253,6 +261,7 @@ pub fn export(index: &Index, app: &str, ui: BTreeMap<String, String>, now: i64) 
         external_imports,
         device_sends,
         workout_sends,
+        workout_categories,
     })
 }
 
@@ -470,6 +479,9 @@ pub fn restore_data(index: &Index, b: &Backup) -> Result<RestoreReport> {
                 params![wid, s.service, s.external_id, s.sent_at],
             )?;
         }
+    }
+    for (path, cat) in &b.workout_categories {
+        tx.execute("UPDATE workouts SET category_user = ?2 WHERE path = ?1 COLLATE NOCASE", params![path, cat])?;
     }
     tx.commit()?;
     Ok(rep)

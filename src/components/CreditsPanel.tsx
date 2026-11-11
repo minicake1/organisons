@@ -30,7 +30,7 @@ export default function CreditsPanel() {
             Services reliés
           </Text>
           <Text size="sm" c="dimmed">
-            {link('https://gpx.studio', 'gpx.studio')} (éditeur open source, licence MIT), Komoot, Openrunner, Hammerhead, Zwift, intervals.icu
+            {link('https://gpx.studio', 'gpx.studio')} (éditeur open source, licence MIT), Pédalons, Komoot, Openrunner, Hammerhead, Zwift, intervals.icu
             et MyWhoosh. Ces noms et marques appartiennent à leurs propriétaires ; Organisons n’est affilié à aucun d’eux. Komoot est utilisé
             par son API interne, non officielle.
           </Text>

@@ -435,6 +435,8 @@ pub struct BatchEdit {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkoutSummary {
+    /// Catégorie choisie par l’utilisateur (sinon `workout.category` est celle détectée).
+    pub category_user: Option<String>,
     pub id: i64,
     pub library_id: i64,
     pub path: String,

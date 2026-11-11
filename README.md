@@ -55,6 +55,7 @@ Tauri 2 (cœur en Rust), React, Mantine et MapLibre. Interface en français, pou
 ### Entraînements
 
 - Séances structurées au format Zwift (`.zwo`) : lues dans les bibliothèques, ou importées dans le dossier « Entraînements » d'une bibliothèque gérée.
+- **Catégories**, comme dans Zwift : récupération, endurance, tempo, sweet spot, seuil, VO2 max (PMA), anaérobie, sprint, test FTP, mixte. Elles sont détectées d’après la catégorie Zwift du fichier, le nom (« FTP test », « Récup », « PMA »…), puis le profil de puissance ; on peut en choisir une autre sur la séance. Filtre par catégorie et badge sur chaque tuile.
 - Graphique de puissance par zone, durée, IF et TSS selon ta FTP.
 - Envoi vers le Karoo, Zwift (copie dans son dossier), intervals.icu (planifiée à une date) ou MyWhoosh (ouverture de son Workout Builder).
 
@@ -62,6 +63,7 @@ Tauri 2 (cœur en Rust), React, Mantine et MapLibre. Interface en français, pou
 
 Tous les services reliés sont dans l'onglet **Connexions** :
 
+- **Pédalons** : connexion au compte (le mot de passe sert une fois ; seul un jeton de session est gardé, dans le gestionnaire d’identifiants de Windows). L’agenda se consulte dans l’onglet **Agenda** : sorties et étapes de voyage de tes équipes (à venir ou passées, toutes ou seulement tes inscriptions), import de leurs parcours, celui de ton groupe si tu es inscrit ; un parcours qui ressemble à une trace existante peut être importé quand même.
 - **Komoot** : connexion au compte, liste des parcours planifiés et réalisés, import en lot avec avancement. Le mot de passe n'est pas conservé ; le jeton d'accès est rangé dans le gestionnaire d'identifiants de Windows. Komoot n'a pas d'API publique : Organisons passe par l'API de son site, qui peut changer sans prévenir.
 - **Openrunner** : coller les liens des parcours publics. Ils sont téléchargés avec leurs points d'intérêt. Un parcours privé doit être exporté depuis le site.
 - **Karoo (Hammerhead)** : connexion au compte par le navigateur (API officielle), puis envoi des traces, avec leurs points d'intérêt, et des séances. Le Karoo les récupère à sa synchronisation.
@@ -82,7 +84,7 @@ Les autres appareils GPS sont à l’étude.
 
 ### Doublons et corbeille
 
-- **Doublons** : fichiers identiques et doublons probables (distance à ±1 %, D+ à ±5 %, départ et arrivée à moins de 300 m).
+- **Doublons** : fichiers identiques et doublons probables (distance à ±1 %, D+ à ±5 %, départ et arrivée à moins de 300 m, et même sens : vent idéal à 45° au plus, une boucle parcourue à l’envers n’est donc pas un doublon).
   - On peut les traiter un par un ou par lot : on choisit la trace à garder (la plus ancienne, la plus récente, la plus taguée, celle de la bibliothèque gérée) et on met les autres de côté.
   - Un doublon mis de côté est déplacé dans le dossier caché `.organisons-doublons` de sa bibliothèque.
 - **Corbeille** : une trace supprimée part dans `.organisons-corbeille`, après confirmation.
@@ -136,7 +138,7 @@ Réglages → **Sauvegarde de la configuration** : un fichier JSON pour retrouve
 - Il contient les bibliothèques et leurs réglages, les tags (détection, mots-clés), les collections et les tours, et pour chaque trace le nom et le sport choisis, les tags, les notes ; plus le thème, la FTP et le dossier Zwift.
 - Les traces sont retrouvées par l’empreinte de leur fichier, même si la bibliothèque a changé de place.
 - La restauration montre d’abord un aperçu. Elle ne supprime rien et ne modifie pas les fichiers GPX.
-- **Sauvegarde automatique** en option : une fois par jour au lancement, dans le dossier de ton choix (par exemple sur le NAS), en gardant les 10 dernières.
+- **Sauvegarde automatique** en option : une fois par jour au lancement, dans le dossier de ton choix (par exemple sur le NAS), en gardant les 3 dernières.
 - Les mots de passe et jetons n’y sont jamais : il faut reconnecter Komoot, Hammerhead et intervals.icu après une restauration.
 
 ## Données et sécurité des fichiers
@@ -192,7 +194,7 @@ Ces vérifications tournent aussi automatiquement sur GitHub (GitHub Actions, `.
 ## Feuille de route
 
 - **Autres appareils GPS** : à l’étude.
-- **Plus tard** : version macOS, éditeur intégré, agenda Pédalons, fonds de carte sombres.
+- **Plus tard** : version macOS, éditeur intégré, fonds de carte sombres.
 
 ## Crédits
 
@@ -204,7 +206,7 @@ Organisons v0.6, sous licence [GNU AGPL v3 ou ultérieure](LICENSE). Code source
 
 ### Services reliés
 
-[gpx.studio](https://gpx.studio) (éditeur open source, licence MIT), Komoot, Openrunner, Hammerhead, Zwift, intervals.icu et MyWhoosh. Ces noms et marques appartiennent à leurs propriétaires ; Organisons n'est affilié à aucun d'eux. Komoot est utilisé par son API interne, non officielle.
+[gpx.studio](https://gpx.studio) (éditeur open source, licence MIT), Pédalons, Komoot, Openrunner, Hammerhead, Zwift, intervals.icu et MyWhoosh. Ces noms et marques appartiennent à leurs propriétaires ; Organisons n'est affilié à aucun d'eux. Komoot est utilisé par son API interne, non officielle.
 
 ### Logiciels libres utilisés
 

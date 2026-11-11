@@ -71,3 +71,18 @@ export const SPORT_COLORS: Record<string, { bg: string; fg: string }> = {
   'Course à pied': { bg: '#e8590c', fg: '#fff' },
 }
 export const sportColor = (sport: string) => SPORT_COLORS[sport] ?? { bg: '#868e96', fg: '#fff' }
+
+/** Catégories de séances, comme les familles de Zwift (couleurs proches de ses zones). */
+export const WORKOUT_CATEGORIES: { value: import('./api').WorkoutCategory; label: string; color: string }[] = [
+  { value: 'recovery', label: 'Récupération', color: 'gray' },
+  { value: 'endurance', label: 'Endurance', color: 'blue' },
+  { value: 'tempo', label: 'Tempo', color: 'teal' },
+  { value: 'sweetspot', label: 'Sweet spot', color: 'lime' },
+  { value: 'threshold', label: 'Seuil', color: 'yellow' },
+  { value: 'vo2max', label: 'VO2 max (PMA)', color: 'orange' },
+  { value: 'anaerobic', label: 'Anaérobie', color: 'red' },
+  { value: 'sprint', label: 'Sprint', color: 'grape' },
+  { value: 'ftp_test', label: 'Test FTP', color: 'dark' },
+  { value: 'mixed', label: 'Mixte', color: 'indigo' },
+]
+export const workoutCategory = (c: string) => WORKOUT_CATEGORIES.find((x) => x.value === c) ?? WORKOUT_CATEGORIES[WORKOUT_CATEGORIES.length - 1]

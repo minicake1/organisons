@@ -175,6 +175,11 @@ export const api = {
   setLibraryWriteGpx: (id: number, writeGpx: boolean) => invoke<void>('set_library_write_gpx', { id, writeGpx }),
   setLibraryMode: (id: number, mode: Library['mode']) => invoke<void>('set_library_mode', { id, mode }),
   uiPrefsSync: (ui: Record<string, string>) => invoke<void>('ui_prefs_sync', { ui }),
+  pedalonsStatus: () => invoke<PedalonsAccount | null>('pedalons_status'),
+  pedalonsLogin: (email: string, password: string) => invoke<PedalonsAccount>('pedalons_login', { email, password }),
+  pedalonsLogout: () => invoke<void>('pedalons_logout'),
+  pedalonsEvents: (from: string, to: string) => invoke<PedalonsEvent[]>('pedalons_events', { from, to }),
+  pedalonsImport: (libraryId: number, events: PedalonsEvent[], force = false) => invoke<OrganizeReport>('pedalons_import', { libraryId, events, force }),
   backupExport: (path: string, ui: Record<string, string>) => invoke<void>('backup_export', { path, ui }),
   backupPreview: (path: string) => invoke<RestorePreview>('backup_preview', { path }),
   backupRestore: (path: string) => invoke<RestoreReport>('backup_restore', { path }),
@@ -211,6 +216,7 @@ export const api = {
   batchEdit: (ids: number[], edit: BatchEdit) => invoke<string[]>('batch_edit', { ids, edit }),
   setCollectionTour: (id: number, isTour: boolean) => invoke<void>('set_collection_tour', { id, isTour }),
   listWorkouts: () => invoke<WorkoutSummary[]>('list_workouts'),
+  setWorkoutCategory: (id: number, category: WorkoutCategory | null) => invoke<void>('set_workout_category', { id, category }),
   zwiftFolders: () => invoke<string[]>('zwift_folders'),
   zwiftSend: (ids: number[], folder: string) => invoke<string[]>('zwift_send', { ids, folder }),
   icuStatus: () => invoke<IcuStatus>('icu_status'),
@@ -340,6 +346,7 @@ export interface WorkoutBlock {
   cadence: number | null
 }
 
+export type WorkoutCategory = 'recovery' | 'endurance' | 'tempo' | 'sweetspot' | 'threshold' | 'vo2max' | 'anaerobic' | 'sprint' | 'ftp_test' | 'mixed'
 /** Entraînement (.zwo) de la bibliothèque. */
 export interface WorkoutSummary {
   id: number
@@ -357,6 +364,10 @@ export interface WorkoutSummary {
   tss: number
   blocks: WorkoutBlock[]
   addedAt: number
+  /** Catégorie (choisie, sinon détectée). */
+  category: WorkoutCategory
+  /** Catégorie choisie par l'utilisateur, sinon null. */
+  categoryUser: WorkoutCategory | null
 }
 
 /** Compte intervals.icu (la clé d'API reste côté Rust). */
@@ -408,4 +419,28 @@ export interface AutoBackup {
   dir: string
   keep: number
   last: number | null
+}
+
+/** Compte Pédalons connecté (jamais les jetons). */
+export interface PedalonsAccount {
+  email: string
+  displayName: string
+}
+/** Sortie ou étape de voyage de l'agenda Pédalons. */
+export interface PedalonsEvent {
+  id: string
+  title: string
+  start: string
+  kind: 'RIDE' | 'TRIP_STAGE' | string
+  teamSlug: string
+  teamName: string
+  entitySlug: string
+  tripSlug: string | null
+  startPlace: string | null
+  distanceKm: number | null
+  elevationGain: number | null
+  registered: boolean
+  groupName: string | null
+  finished: boolean
+  imported: boolean
 }
