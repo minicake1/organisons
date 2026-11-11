@@ -149,11 +149,15 @@ Avant de pousser une nouvelle version (changement du numéro dans `package.json`
 - Restauration avec aperçu (ce qui sera ajouté ou remplacé) avant d'écrire quoi que ce soit ; option de sauvegarde automatique régulière (dans un dossier choisi, par exemple sur le NAS), en gardant les N dernières.
 - Les tags et notes déjà écrits dans les GPX (bibliothèques avec écriture) reviennent aussi à la relecture ; la sauvegarde couvre tout le reste.
 
-### Avant de rendre le dépôt public
-- **Secret Hammerhead** : réglé pour les installateurs par `npm run build:public` (voir v0.6). Reste à demander à Hammerhead ce qu'ils autorisent pour une appli de bureau distribuée (application commune intégrée, PKCE, ou chacun la sienne), et à vérifier la licence de leur API.
-- **Licence : AGPL-3.0-or-later, choisie et appliquée le 10/11/2026** (avant : PolyForm Noncommercial 1.0.0). Raison : comme la GPL, toute redistribution partage son code, et une version proposée en ligne (version web, serveur d'échange OAuth…) doit aussi publier ses modifications. L'usage commercial est permis, à condition de partager le code. Du code de Pédalons (PolyForm Noncommercial) ne pourrait pas être repris sans l'accord de son auteur. À vérifier : licences des dépendances (npm, Cargo) et mentions des données (OpenStreetMap ODbL, OpenFreeMap, VersaTiles).
-- **Historique Git** : le commit fait sur GitHub qui portait une adresse e-mail personnelle est réécrit avec l’adresse `noreply` de GitHub (11/2026).
-- **Fichier de test** : l’ancien parcours Openrunner d’un tiers est remplacé par une trace synthétique (`boucle-600.gpx`, générée par `generer-boucle.mjs`) et effacé de l’historique Git (11/2026).
+### Publication (dépôt public depuis le 10/11/2026)
+- **Fait** :
+  - licence AGPL-3.0-or-later (avant : PolyForm Noncommercial 1.0.0) : toute redistribution partage son code, et une version proposée en ligne (version web, serveur d'échange OAuth…) doit aussi publier ses modifications ; l'usage commercial est permis à cette condition. Du code de Pédalons (PolyForm Noncommercial) ne pourrait pas être repris sans l'accord de son auteur ;
+  - dépôt recréé avec un historique nettoyé (trace de test synthétique `boucle-600.gpx` à la place d'un parcours d'un tiers) ;
+  - installateurs publics sans application Hammerhead intégrée (`npm run build:public` en local, `release.yml` sur GitHub) ;
+  - CI, alertes Dependabot, détection de secrets ; Release v0.6.0 publiée.
+- **Reste à faire** :
+  - demander à Hammerhead ce qu'ils autorisent pour une appli de bureau distribuée (application commune intégrée, PKCE, ou chacun la sienne) et vérifier la licence de leur API ;
+  - vérifier les licences des dépendances (npm, Cargo) et les mentions des données (OpenStreetMap ODbL, OpenFreeMap, VersaTiles).
 - **Komoot** : API interne non officielle, déjà signalée dans l'appli et le README.
 
 ### Autres appareils GPS
