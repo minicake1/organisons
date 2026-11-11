@@ -193,6 +193,7 @@ Ces vérifications tournent aussi automatiquement sur GitHub (GitHub Actions, `.
 
 ## Feuille de route
 
+- **v0.8** : suivi des mises à jour, gestion plus approfondie des points d’intérêt.
 - **Autres appareils GPS** : à l’étude.
 - **Plus tard** : version macOS, éditeur intégré, fonds de carte sombres.
 
