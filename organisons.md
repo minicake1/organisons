@@ -136,6 +136,19 @@ Avant de pousser une nouvelle version (changement du numéro dans `package.json`
 
 ## Feuille de route
 
+### v0.7 : sauvegarde de la configuration (à étudier)
+- **Fichier de sauvegarde** exportable et réimportable (JSON lisible, par exemple `organisons-sauvegarde-AAAA-MM-JJ.json`), depuis Réglages, pour retrouver sa configuration après une réinstallation, sur un autre PC ou après avoir supprimé l'index.
+- Contenu envisagé :
+  - bibliothèques (nom, chemin, mode, modèle de rangement, écriture dans les GPX) ;
+  - réglages : dossier surveillé, vidages automatiques (corbeille, doublons), thème, FTP, dossier Zwift (ces trois derniers sont aujourd'hui dans le `localStorage` de l'appli) ;
+  - tags (détection auto, mots-clés), collections et tours (ordre des étapes) ;
+  - données propres à chaque trace : tags, notes, sport et nom choisis, collections, tags proposés ignorés, paires « pas des doublons » ;
+  - parcours déjà importés (Komoot, Openrunner) et envois mémorisés (Karoo, séances).
+- Les traces sont retrouvées à la restauration par l'empreinte du fichier (SHA-256), puis par le chemin : une bibliothèque déplacée ou un NAS renommé reste reconnu.
+- **Jamais de secrets** dans le fichier : jetons et clés (Komoot, Hammerhead, intervals.icu) restent dans le gestionnaire d'identifiants de Windows, à reconnecter après une restauration.
+- Restauration avec aperçu (ce qui sera ajouté ou remplacé) avant d'écrire quoi que ce soit ; option de sauvegarde automatique régulière (dans un dossier choisi, par exemple sur le NAS), en gardant les N dernières.
+- Les tags et notes déjà écrits dans les GPX (bibliothèques avec écriture) reviennent aussi à la relecture ; la sauvegarde couvre tout le reste.
+
 ### Avant de rendre le dépôt public
 - **Secret Hammerhead** : réglé pour les installateurs par `npm run build:public` (voir v0.6). Reste à demander à Hammerhead ce qu'ils autorisent pour une appli de bureau distribuée (application commune intégrée, PKCE, ou chacun la sienne), et à vérifier la licence de leur API.
 - **Licence : AGPL-3.0-or-later, choisie et appliquée le 10/11/2026** (avant : PolyForm Noncommercial 1.0.0). Raison : comme la GPL, toute redistribution partage son code, et une version proposée en ligne (version web, serveur d'échange OAuth…) doit aussi publier ses modifications. L'usage commercial est permis, à condition de partager le code. Du code de Pédalons (PolyForm Noncommercial) ne pourrait pas être repris sans l'accord de son auteur. À vérifier : licences des dépendances (npm, Cargo) et mentions des données (OpenStreetMap ODbL, OpenFreeMap, VersaTiles).

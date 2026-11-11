@@ -98,7 +98,7 @@ Les autres appareils GPS sont à l’étude.
 
 ### Avec l'installateur (Windows)
 
-Télécharger `Organisons_<version>_x64_fr-FR.msi` ou `Organisons_<version>_x64-setup.exe` sur la page [Releases](https://github.com/minicake1/organisons/releases), puis le lancer. L'appli s'installe dans `C:\Program Files\Organisons`. Elle utilise WebView2, déjà présent sur Windows 11. Les installateurs ne sont pas signés : Windows SmartScreen peut afficher un avertissement (« Informations complémentaires » → « Exécuter quand même »).
+Télécharger `Organisons_<version>_x64_fr-FR.msi` ou `Organisons_<version>_x64-setup.exe` sur la page [Releases](https://github.com/minicake1/organisons/releases), puis le lancer. L'appli s'installe dans `C:Program FilesOrganisons`. Elle utilise WebView2, déjà présent sur Windows 11. Les installateurs ne sont pas signés : Windows SmartScreen peut afficher un avertissement (« Informations complémentaires » → « Exécuter quand même »).
 
 ### Depuis les sources
 
@@ -180,6 +180,7 @@ Ces vérifications tournent aussi automatiquement sur GitHub (GitHub Actions, `.
 
 ## Feuille de route
 
+- **v0.7** : sauvegarde de la configuration dans un fichier (bibliothèques, réglages, tags, collections, tours, notes…), à réimporter après une réinstallation ou sur un autre PC. Sans les mots de passe ni les jetons.
 - **Autres appareils GPS** : à l’étude.
 - **Plus tard** : version macOS, éditeur intégré, agenda Pédalons, fonds de carte sombres.
 
