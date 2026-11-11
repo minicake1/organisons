@@ -54,6 +54,7 @@ pub fn scan_library_shared(index: &impl IndexAccess, library: &Library, now: i64
     let mut seen = HashSet::new();
     let mut walk_failed = false;
     let mut seen_workouts = HashSet::new();
+    let mut added: Vec<String> = Vec::new();
     let walker = WalkDir::new(&library.path).follow_links(true).into_iter().filter_entry(|e| {
         e.depth() == 0 || !e.file_name().to_string_lossy().starts_with('.')
     });
@@ -84,7 +85,10 @@ pub fn scan_library_shared(index: &impl IndexAccess, library: &Library, now: i64
         let key = path.to_string_lossy().to_string();
         seen.insert(key.clone());
         match index.with(|i| index_file(i, library, path, &key, now)) {
-            Ok(Outcome::Added) => report.added += 1,
+            Ok(Outcome::Added) => {
+                report.added += 1;
+                added.push(key.clone());
+            }
             Ok(Outcome::Updated) => report.updated += 1,
             Ok(Outcome::Unchanged) => report.unchanged += 1,
             Err(e) => report.errors.push(e.to_string()),
@@ -98,6 +102,21 @@ pub fn scan_library_shared(index: &impl IndexAccess, library: &Library, now: i64
             let n = i.remove_missing(library.id, &seen)?;
             i.remove_missing_workouts(library.id, &seen_workouts)?;
             Ok(n)
+        })?;
+    }
+    // Bibliothèque gérée : un fichier déjà rangé dans le dossier d'un sport garde ce
+    // sport (nouvelles traces, et une fois pour les traces déjà indexées).
+    if library.mode == "managed" {
+        index.with(|i| {
+            let flag = format!("sports_dossiers_v1_{}", library.id);
+            if i.setting(&flag)?.is_none() {
+                crate::organize::adopt_folder_sports(i, library, None)?;
+                i.set_setting(&flag, "1")?;
+            } else if !added.is_empty() {
+                let ids: Vec<i64> = added.iter().filter_map(|p| i.trace_id_by_path(p).ok().flatten()).collect();
+                crate::organize::adopt_folder_sports(i, library, Some(&ids))?;
+            }
+            Ok(())
         })?;
     }
     Ok(report)
@@ -130,7 +149,15 @@ pub(crate) fn index_file(index: &mut Index, library: &Library, path: &Path, key:
             return Ok(Outcome::Unchanged);
         }
     }
-    let analysis = analyze_file(path)?;
+    let analysis = analyze_file(path).map_err(|e| {
+        // Séance Zwift enregistrée en .gpx (ancien bug de numérotation « (2) », corrigé en v0.5.1).
+        let head = fs::read(path).map(|b| String::from_utf8_lossy(&b[..b.len().min(4096)]).to_string()).unwrap_or_default();
+        if head.contains("<workout_file") {
+            Error::Invalid(format!("{} : c'est une séance Zwift (.zwo) enregistrée en .gpx ; renomme-la en .zwo, ou supprime-la si c'est un doublon", path.display()))
+        } else {
+            e
+        }
+    })?;
     let source = source_of(&analysis);
     // Nom connu avant cette lecture (encore avec l'identifiant si la trace date d'avant le nettoyage des noms).
     let old_name = previous.as_ref().and_then(|p| index.get(p.id).ok()).map(|t| t.summary.name);

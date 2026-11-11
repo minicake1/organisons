@@ -5,6 +5,7 @@
 
 pub mod analyze;
 pub mod autotags;
+pub mod backup;
 pub mod device;
 pub mod error;
 pub mod geo;
@@ -13,6 +14,7 @@ pub mod index;
 pub mod model;
 pub mod naming;
 pub mod organize;
+pub mod poi;
 pub mod scan;
 pub mod sport;
 pub mod tour;

@@ -193,12 +193,12 @@ pub fn analyze_gpx(gpx: &gpx::Gpx, fallback_name: &str) -> Option<TraceAnalysis>
             let nearest = nearest_index(&raw, lat, lon);
             let name = w.name.clone().unwrap_or_default().trim().to_string();
             Poi {
-                kind: classify_poi(w.symbol.as_deref(), &name),
+                kind: classify_poi_with_type(w.symbol.as_deref(), w.type_.as_deref(), &name),
                 name,
                 km: round(cum[nearest], 2),
                 lat,
                 lon,
-                symbol: w.symbol.clone(),
+                symbol: w.symbol.clone().or_else(|| w.type_.clone()),
             }
         })
         .collect::<Vec<_>>();
@@ -270,33 +270,15 @@ fn ideal_wind(raw: &[RawPoint]) -> WindDirection {
         .unwrap_or(WindDirection::N)
 }
 
-/// Catégorie d'un waypoint : codes Openrunner, symboles Garmin courants,
-/// puis le nom en dernier recours.
+/// Catégorie d'un waypoint d'après le tableau d'équivalences (`data/poi-equivalences.md`) :
+/// symbole (`<sym>`, sinon `<type>`), puis le nom.
+pub fn classify_poi_with_type(symbol: Option<&str>, type_: Option<&str>, name: &str) -> PoiKind {
+    crate::poi::rules().classify(symbol, type_, name)
+}
+
+/// Comme [`classify_poi_with_type`], sans `<type>`.
 pub fn classify_poi(symbol: Option<&str>, name: &str) -> PoiKind {
-    let n = name.to_lowercase();
-    if let Some(sym) = symbol.map(|s| s.trim().to_lowercase()) {
-        match sym.as_str() {
-            "1" => return PoiKind::Control,
-            "15" | "16" => return PoiKind::Warning,
-            "104" | "drinking water" => return PoiKind::Water,
-            "50" | "shopping center" | "restaurant" | "convenience store" | "food" => return PoiKind::Shop,
-            "60" | "scenic area" | "museum" | "church" | "summit" => return PoiKind::Sight,
-            "danger area" | "skull and crossbones" => return PoiKind::Warning,
-            _ => {}
-        }
-    }
-    let starts_cp = n.starts_with("cp ") || n.starts_with("cp:") || n.starts_with("cp-") || n.starts_with("cp1");
-    if starts_cp || n.contains("contrôle") || n.contains("controle") {
-        PoiKind::Control
-    } else if n.contains("eau") || n.contains("fontaine") || n.contains("water") {
-        PoiKind::Water
-    } else if n.contains("boulangerie") || n.contains("commerce") || n.contains("café") || n.contains("bar ") {
-        PoiKind::Shop
-    } else if n.contains("attention") || n.contains("danger") || n.contains("risque") || n.contains('%') {
-        PoiKind::Warning
-    } else {
-        PoiKind::Other
-    }
+    classify_poi_with_type(symbol, None, name)
 }
 
 fn nearest_index(raw: &[RawPoint], lat: f64, lon: f64) -> usize {

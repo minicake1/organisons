@@ -8,7 +8,7 @@ use crate::error::{Error, Result};
 use crate::model::*;
 
 /// Version des règles d’analyse : la changer fait relire tous les fichiers une fois.
-const ANALYSIS_VERSION: &str = "7";
+const ANALYSIS_VERSION: &str = "8";
 
 const SCHEMA: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -173,7 +173,7 @@ pub struct FileState {
 }
 
 pub struct Index {
-    conn: Connection,
+    pub(crate) conn: Connection,
 }
 
 impl Index {
@@ -268,6 +268,22 @@ impl Index {
     /// Modèle de rangement d’une bibliothèque (déjà vérifié par `organize::validate_pattern`).
     pub fn set_library_pattern(&self, id: i64, pattern: &str) -> Result<()> {
         self.conn.execute("UPDATE libraries SET pattern = ?2 WHERE id = ?1", params![id, pattern])?;
+        Ok(())
+    }
+
+    /// Change le mode d'une bibliothèque : « index » (fichiers laissés en place) ou
+    /// « managed » (Organisons peut ranger et importer). Une bibliothèque qui devient
+    /// gérée prend le modèle de rangement par défaut si elle n'en a pas.
+    pub fn set_library_mode(&self, id: i64, mode: &str) -> Result<()> {
+        if mode != "index" && mode != "managed" {
+            return Err(Error::Invalid(format!("Mode de bibliothèque inconnu : {mode}")));
+        }
+        self.conn.execute(
+            "UPDATE libraries SET mode = ?2,
+                pattern = CASE WHEN ?2 = 'managed' AND TRIM(pattern) = '' THEN ?3 ELSE pattern END
+             WHERE id = ?1",
+            params![id, mode, crate::organize::DEFAULT_PATTERN],
+        )?;
         Ok(())
     }
 
@@ -573,6 +589,13 @@ impl Index {
     /// La trace a-t-elle un nom choisi par l'utilisateur ?
     pub fn has_user_name(&self, id: i64) -> Result<bool> {
         Ok(self.conn.query_row("SELECT name_user IS NOT NULL FROM traces WHERE id = ?1", [id], |r| r.get(0))?)
+    }
+
+    /// Traces d'une bibliothèque sans sport choisi par l'utilisateur : (id, chemin, sport lu dans le GPX).
+    pub fn traces_without_user_sport(&self, library_id: i64) -> Result<Vec<(i64, String, String)>> {
+        let mut st = self.conn.prepare("SELECT id, path, sport FROM traces WHERE library_id = ?1 AND sport_user IS NULL")?;
+        let rows = st.query_map([library_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
     pub fn set_sport(&self, id: i64, sport: Option<&str>) -> Result<()> {

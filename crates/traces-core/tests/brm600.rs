@@ -401,6 +401,123 @@ fn corbeille() {
 }
 
 #[test]
+fn sauvegarde_et_restauration_de_la_configuration() {
+    use std::collections::BTreeMap;
+    use traces_core::backup;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("NAS");
+    std::fs::create_dir_all(root.join("Vélo")).unwrap();
+    std::fs::copy(fixture(), root.join("Vélo").join("a.gpx")).unwrap();
+    let b_xml = std::fs::read_to_string(fixture()).unwrap().replacen("<gpx", "<!-- b -->\n<gpx", 1);
+    std::fs::write(root.join("Vélo").join("b.gpx"), b_xml).unwrap();
+
+    // Configuration d'origine.
+    let mut idx = Index::open_in_memory().unwrap();
+    let lib = idx.add_library("NAS", &root.to_string_lossy(), "managed", "{sport}/{nom}.gpx", false).unwrap();
+    scan_library(&mut idx, &lib, 1_000).unwrap();
+    let a = idx.trace_id_by_path(&root.join("Vélo").join("a.gpx").to_string_lossy()).unwrap().unwrap();
+    let b = idx.trace_id_by_path(&root.join("Vélo").join("b.gpx").to_string_lossy()).unwrap().unwrap();
+    idx.set_tags(a, &["BRM".into(), "Manche".into()]).unwrap();
+    idx.set_notes(a, "Départ 6 h").unwrap();
+    idx.set_sport(a, Some("Gravel")).unwrap();
+    idx.set_name(b, Some("Variante"), "").unwrap();
+    idx.create_tag("NP").unwrap();
+    idx.set_tag_keywords("NP", &["NP#".into()]).unwrap();
+    let tour = idx.create_collection("Tour 2027", 1_000).unwrap();
+    idx.set_trace_collections(b, &[tour.id]).unwrap();
+    idx.set_trace_collections(a, &[tour.id]).unwrap();
+    idx.set_collection_tour(tour.id, true).unwrap();
+    idx.set_tour_order(tour.id, &[b, a]).unwrap();
+    idx.mark_not_duplicates(&[a, b]).unwrap();
+    idx.set_setting("trash_purge_days", "14").unwrap();
+    idx.mark_external_import("komoot", "123", "x.gpx", 1_000).unwrap();
+    let ui = BTreeMap::from([("organisons.ftp".to_string(), "250".to_string())]);
+    let saved = backup::export(&idx, "0.7.0", ui, 2_000).unwrap();
+    let text = serde_json::to_string_pretty(&saved).unwrap();
+    assert!(!text.contains("analysis_version"), "réglages internes exclus");
+    let saved = backup::parse(&text).unwrap();
+
+    // 1. Réinstallation : index neuf, mêmes dossiers.
+    let mut fresh = Index::open_in_memory().unwrap();
+    let p = backup::preview(&fresh, &saved).unwrap();
+    assert_eq!((p.libraries_new.len(), p.traces_total, p.traces_found), (1, 2, 0));
+    let added = backup::restore_libraries(&fresh, &saved).unwrap();
+    for l in &added {
+        scan_library(&mut fresh, l, 3_000).unwrap();
+    }
+    let rep = backup::restore_data(&fresh, &saved).unwrap();
+    assert_eq!((rep.traces_restored, rep.traces_missing), (2, 0));
+    assert_eq!(rep.ui.get("organisons.ftp").map(String::as_str), Some("250"));
+    let lib2 = fresh.libraries().unwrap().remove(0);
+    assert_eq!((lib2.mode.as_str(), lib2.pattern.as_str()), ("managed", "{sport}/{nom}.gpx"));
+    let a2 = fresh.trace_id_by_path(&root.join("Vélo").join("a.gpx").to_string_lossy()).unwrap().unwrap();
+    let b2 = fresh.trace_id_by_path(&root.join("Vélo").join("b.gpx").to_string_lossy()).unwrap().unwrap();
+    let t = fresh.get(a2).unwrap();
+    assert_eq!(t.summary.tags, vec!["BRM".to_string(), "Manche".to_string()]);
+    assert_eq!((t.notes.as_str(), t.summary.sport.as_str()), ("Départ 6 h", "Gravel"));
+    assert_eq!(fresh.get(b2).unwrap().summary.name, "Variante");
+    assert_eq!(fresh.setting("trash_purge_days").unwrap().as_deref(), Some("14"));
+    let np = |i: &Index| i.tag_counts().unwrap().into_iter().find(|t| t.tag == "NP").map(|t| (t.auto, t.keywords));
+    assert_eq!(np(&fresh), np(&idx), "détection auto et mots-clés du tag");
+    assert!(np(&fresh).unwrap().1.contains(&"NP#".to_string()));
+    let col = fresh.collections().unwrap().into_iter().find(|c| c.name == "Tour 2027").unwrap();
+    assert!(col.is_tour);
+    let stages: Vec<i64> = fresh.tour_stages(col.id).unwrap().iter().map(|s| s.summary.id).collect();
+    assert_eq!(stages, vec![b2, a2], "ordre des étapes gardé");
+    assert!(fresh.external_imports("komoot").unwrap().contains("123"));
+
+    // 2. Autre PC : fichiers déplacés ailleurs, bibliothèque ajoutée à la main ; retrouvés par l'empreinte.
+    let moved = dir.path().join("Autre PC");
+    std::fs::create_dir_all(&moved).unwrap();
+    std::fs::copy(root.join("Vélo").join("a.gpx"), moved.join("renommé.gpx")).unwrap();
+    let mut other = Index::open_in_memory().unwrap();
+    let lib3 = other.add_library("PC", &moved.to_string_lossy(), "index", "", false).unwrap();
+    scan_library(&mut other, &lib3, 3_000).unwrap();
+    let rep = backup::restore_data(&other, &saved).unwrap();
+    assert_eq!((rep.traces_restored, rep.traces_missing), (1, 1));
+    let t = other.get(other.list(&TraceFilter::default()).unwrap()[0].id).unwrap();
+    assert_eq!(t.notes, "Départ 6 h");
+
+    // Fichier qui n'est pas une sauvegarde.
+    assert!(backup::parse("{\"format\":\"autre\"}").is_err());
+    assert!(backup::parse("pas du json").is_err());
+}
+
+#[test]
+fn dossier_de_sport_garde_apres_reconstruction_de_l_index() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("NAS");
+    // Rangée à la main en Gravel (le GPX, lui, dit « Vélo ») ; une autre bien à sa place ; une hors modèle.
+    std::fs::create_dir_all(root.join("Gravel").join("2027")).unwrap();
+    std::fs::create_dir_all(root.join("Vélo").join("2027")).unwrap();
+    std::fs::copy(fixture(), root.join("Gravel").join("2027").join("BRM 600 Tour de Manche.gpx")).unwrap();
+    let other = std::fs::read_to_string(fixture()).unwrap().replacen("<gpx", "<!-- b -->\n<gpx", 1);
+    std::fs::write(root.join("Vélo").join("2027").join("BRM 600 Tour de Manche (2).gpx"), other).unwrap();
+    let vrac = std::fs::read_to_string(fixture()).unwrap().replacen("<gpx", "<!-- c -->\n<gpx", 1);
+    std::fs::write(root.join("vrac.gpx"), vrac).unwrap();
+
+    // Index neuf (réinstallation), bibliothèque ajoutée indexée sur place puis passée en gérée.
+    let mut idx = Index::open_in_memory().unwrap();
+    let lib = idx.add_library("NAS", &root.to_string_lossy(), "index", "", false).unwrap();
+    scan_library(&mut idx, &lib, 1_000).unwrap();
+    idx.set_library_mode(lib.id, "managed").unwrap();
+    let lib = idx.library(lib.id).unwrap();
+    assert_eq!(lib.pattern, organize::DEFAULT_PATTERN);
+    assert_eq!(organize::adopt_folder_sports(&idx, &lib, None).unwrap(), 1);
+
+    // « Ranger » ne propose plus que le fichier hors modèle.
+    let moves = organize::plan(&idx, &lib).unwrap();
+    assert_eq!(moves.len(), 1, "{moves:?}");
+    assert!(moves[0].from.ends_with("vrac.gpx"));
+    // Le choix de l'utilisateur reste prioritaire, et la relecture ne le change pas.
+    let id = idx.trace_id_by_path(&root.join("Gravel").join("2027").join("BRM 600 Tour de Manche.gpx").to_string_lossy()).unwrap().unwrap();
+    assert_eq!(idx.get(id).unwrap().summary.sport, "Gravel");
+    idx.set_sport(id, Some("VTT")).unwrap();
+    scan_library(&mut idx, &lib, 2_000).unwrap();
+    assert_eq!(idx.get(id).unwrap().summary.sport, "VTT");
+}
+
+#[test]
 fn renommer_une_trace() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("NAS");

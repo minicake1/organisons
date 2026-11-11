@@ -27,6 +27,7 @@ import ConnectionsPage, { type ConnectionTab } from './pages/ConnectionsPage'
 import WorkoutsPage from './pages/WorkoutsPage'
 import InboxPanel from './components/InboxPanel'
 import { APP_VERSION } from './version'
+import { readUiPrefs } from './uiPrefs'
 
 export type Route =
   | { page: 'library'; filter?: TraceFilter }
@@ -85,6 +86,11 @@ export default function App() {
       window.removeEventListener('mouseup', onMouse)
     }
   }, [back, forward])
+  // Préférences de l’interface (thème, FTP, dossier Zwift) gardées aussi dans l’index,
+  // pour la sauvegarde automatique de la configuration.
+  useEffect(() => {
+    api.uiPrefsSync(readUiPrefs()).catch(() => {})
+  }, [])
   const [dupCount, setDupCount] = useState(0)
   const [trashCount, setTrashCount] = useState(0)
   const onLibrary = route.page === 'library' || (route.page === 'trace' && route.back.page === 'library')

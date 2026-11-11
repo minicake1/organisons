@@ -29,6 +29,8 @@ export const POI_KINDS: { kind: PoiKind; label: string; color: string; big: bool
   { kind: 'water', label: 'Eau', color: '#1c7ed6', big: false, byDefault: false },
   { kind: 'shop', label: 'Commerces', color: '#7048e8', big: false, byDefault: false },
   { kind: 'sight', label: 'Curiosités', color: '#2b8a3e', big: false, byDefault: false },
+  { kind: 'lodging', label: 'Hébergement', color: '#c2255c', big: false, byDefault: false },
+  { kind: 'service', label: 'Services', color: '#1098ad', big: false, byDefault: false },
   { kind: 'other', label: 'Autres', color: '#868e96', big: false, byDefault: false },
 ]
 export const poiKind = (k: PoiKind) => POI_KINDS.find((p) => p.kind === k) ?? POI_KINDS[POI_KINDS.length - 1]

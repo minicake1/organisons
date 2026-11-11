@@ -77,6 +77,16 @@ fn remove_library(state: State<AppState>, id: i64) -> CmdResult<()> {
 }
 
 #[tauri::command]
+fn set_library_mode(state: State<AppState>, id: i64, mode: String) -> CmdResult<()> {
+    let index = state.index.lock().map_err(err)?;
+    index.set_library_mode(id, &mode).map_err(err)?;
+    // Devenue gérée : les fichiers déjà rangés par sport gardent leur sport.
+    let lib = index.library(id).map_err(err)?;
+    organize::adopt_folder_sports(&index, &lib, None).map_err(err)?;
+    Ok(())
+}
+
+#[tauri::command]
 fn set_library_write_gpx(state: State<AppState>, id: i64, write_gpx: bool) -> CmdResult<()> {
     state.index.lock().map_err(err)?.set_library_write_gpx(id, write_gpx).map_err(err)
 }
@@ -971,6 +981,134 @@ fn index_path(dir: &std::path::Path) -> std::path::PathBuf {
     dev
 }
 
+// ---- Sauvegarde de la configuration ----------------------------------------
+
+/// Préférences de l'interface (thème, FTP, dossier Zwift), gardées dans l'index
+/// pour les sauvegardes automatiques ; envoyées par l'interface à son démarrage.
+const UI_PREFS_KEY: &str = "ui_prefs";
+
+fn ui_prefs(index: &Index) -> std::collections::BTreeMap<String, String> {
+    index.setting(UI_PREFS_KEY).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+}
+
+#[tauri::command]
+fn ui_prefs_sync(state: State<AppState>, ui: std::collections::BTreeMap<String, String>) -> CmdResult<()> {
+    let index = state.index.lock().map_err(err)?;
+    index.set_setting(UI_PREFS_KEY, &serde_json::to_string(&ui).map_err(err)?).map_err(err)
+}
+
+/// Écrit une sauvegarde de la configuration dans le fichier choisi.
+#[tauri::command]
+async fn backup_export(app: tauri::AppHandle, path: String, ui: std::collections::BTreeMap<String, String>) -> CmdResult<()> {
+    blocking(move || {
+        let b = {
+            let state = app.state::<AppState>();
+            let index = state.index.lock().map_err(err)?;
+            index.set_setting(UI_PREFS_KEY, &serde_json::to_string(&ui).map_err(err)?).map_err(err)?;
+            traces_core::backup::export(&index, env!("CARGO_PKG_VERSION"), ui, now()).map_err(err)?
+        };
+        let text = serde_json::to_string_pretty(&b).map_err(err)?;
+        std::fs::write(&path, text).map_err(|e| format!("{path} : écriture impossible ({e})"))
+    })
+    .await
+}
+
+fn read_backup(path: &str) -> CmdResult<traces_core::backup::Backup> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{path} : lecture impossible ({e})"))?;
+    traces_core::backup::parse(&text).map_err(err)
+}
+
+/// Ce que ferait la restauration de ce fichier (rien n'est écrit).
+#[tauri::command]
+async fn backup_preview(app: tauri::AppHandle, path: String) -> CmdResult<traces_core::backup::RestorePreview> {
+    blocking(move || {
+        let b = read_backup(&path)?;
+        traces_core::backup::preview(&*app.state::<AppState>().index.lock().map_err(err)?, &b).map_err(err)
+    })
+    .await
+}
+
+/// Restaure une sauvegarde : bibliothèques (ajoutées puis lues), réglages, tags,
+/// collections, données des traces. Les fichiers GPX ne sont pas modifiés.
+#[tauri::command]
+async fn backup_restore(app: tauri::AppHandle, path: String) -> CmdResult<traces_core::backup::RestoreReport> {
+    blocking(move || {
+        let b = read_backup(&path)?;
+        let state = app.state::<AppState>();
+        let added = traces_core::backup::restore_libraries(&*state.index.lock().map_err(err)?, &b).map_err(err)?;
+        let mut errors = Vec::new();
+        for lib in &added {
+            if std::path::Path::new(&lib.path).is_dir() {
+                if let Err(e) = scan_library_shared(&state.index, lib, now()) {
+                    errors.push(e.to_string());
+                }
+            } else {
+                errors.push(format!("{} : dossier injoignable ({}), ses traces seront retrouvées quand il sera accessible (restaure à nouveau).", lib.name, lib.path));
+            }
+        }
+        let mut rep = traces_core::backup::restore_data(&*state.index.lock().map_err(err)?, &b).map_err(err)?;
+        rep.libraries_added = added.len();
+        rep.errors.splice(0..0, errors);
+        Ok(rep)
+    })
+    .await
+}
+
+/// Sauvegarde automatique : dossier (vide = désactivée) et nombre de fichiers gardés.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AutoBackup {
+    dir: String,
+    keep: usize,
+    last: Option<i64>,
+}
+
+fn auto_backup_status(index: &Index) -> AutoBackup {
+    AutoBackup {
+        dir: index.setting("backup_dir").ok().flatten().unwrap_or_default(),
+        keep: index.setting("backup_keep").ok().flatten().and_then(|v| v.parse().ok()).unwrap_or(10),
+        last: index.setting("last_backup").ok().flatten().and_then(|v| v.parse().ok()),
+    }
+}
+
+#[tauri::command]
+fn backup_auto_get(state: State<AppState>) -> CmdResult<AutoBackup> {
+    Ok(auto_backup_status(&*state.index.lock().map_err(err)?))
+}
+
+#[tauri::command]
+fn backup_auto_set(state: State<AppState>, dir: String, keep: usize) -> CmdResult<AutoBackup> {
+    let index = state.index.lock().map_err(err)?;
+    let dir = dir.trim();
+    if !dir.is_empty() && !std::path::Path::new(dir).is_dir() {
+        return Err(format!("Dossier introuvable : {dir}"));
+    }
+    index.set_setting("backup_dir", dir).map_err(err)?;
+    index.set_setting("backup_keep", &keep.clamp(1, 100).to_string()).map_err(err)?;
+    Ok(auto_backup_status(&index))
+}
+
+/// Fait la sauvegarde automatique si elle est activée et date de plus d'un jour
+/// (ou tout de suite avec `force`). Renvoie le fichier écrit.
+fn auto_backup(index: &Mutex<Index>, force: bool) -> CmdResult<Option<String>> {
+    let (b, s) = {
+        let index = index.lock().map_err(err)?;
+        let s = auto_backup_status(&index);
+        if s.dir.is_empty() || (!force && s.last.is_some_and(|l| now() - l < 86_400)) {
+            return Ok(None);
+        }
+        (traces_core::backup::export(&index, env!("CARGO_PKG_VERSION"), ui_prefs(&index), now()).map_err(err)?, s)
+    };
+    let path = traces_core::backup::write_to_dir(std::path::Path::new(&s.dir), &b, s.keep).map_err(err)?;
+    index.lock().map_err(err)?.set_setting("last_backup", &now().to_string()).map_err(err)?;
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+async fn backup_auto_now(app: tauri::AppHandle) -> CmdResult<Option<String>> {
+    blocking(move || auto_backup(&app.state::<AppState>().index, true)).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -981,10 +1119,22 @@ pub fn run() {
             let index = Index::open(&index_path(&dir))?;
             auto_purge(&index);
             app.manage(AppState { index: Mutex::new(index) });
+            // Sauvegarde automatique de la configuration (une fois par jour), sans retarder l’ouverture.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let _ = auto_backup(&handle.state::<AppState>().index, false);
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             list_libraries,
+            ui_prefs_sync,
+            backup_export,
+            backup_preview,
+            backup_restore,
+            backup_auto_get,
+            backup_auto_set,
+            backup_auto_now,
             gpxstudio_open,
             rename_trace,
             inbox_list,
@@ -996,6 +1146,7 @@ pub fn run() {
             add_library,
             remove_library,
             set_library_write_gpx,
+            set_library_mode,
             scan_all,
             list_traces,
             get_trace,

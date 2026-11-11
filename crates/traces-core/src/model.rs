@@ -100,7 +100,7 @@ impl WindDirection {
 }
 
 /// Catégorie d'un point d'intérêt.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PoiKind {
     /// Point de contrôle (brevets…)
@@ -111,6 +111,10 @@ pub enum PoiKind {
     Shop,
     /// Curiosité, point de vue, monument…
     Sight,
+    /// Camping, hôtel, gîte, refuge…
+    Lodging,
+    /// Parking, toilettes, information, pharmacie…
+    Service,
     Other,
 }
 
@@ -122,6 +126,8 @@ impl PoiKind {
             Self::Water => "water",
             Self::Shop => "shop",
             Self::Sight => "sight",
+            Self::Lodging => "lodging",
+            Self::Service => "service",
             Self::Other => "other",
         }
     }
@@ -132,6 +138,8 @@ impl PoiKind {
             "water" => Self::Water,
             "shop" => Self::Shop,
             "sight" => Self::Sight,
+            "lodging" => Self::Lodging,
+            "service" => Self::Service,
             _ => Self::Other,
         }
     }

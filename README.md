@@ -8,7 +8,7 @@ Tauri 2 (cœur en Rust), React, Mantine et MapLibre. Interface en français, pou
 ### Bibliothèque
 
 - **Dossiers du PC ou du NAS** (lecteur réseau ou chemin `\\NAS\…`), lus récursivement. Une relecture ne réanalyse que les fichiers modifiés.
-- **Deux modes de bibliothèque** :
+- **Deux modes de bibliothèque**, modifiables à tout moment dans les Réglages :
   - *indexée sur place* : les fichiers restent où ils sont ;
   - *gérée* : rangée selon un modèle de dossiers modifiable dans les Réglages (`{sport}/{année}/{nom}.gpx` par défaut, avec aussi `{mois}`, `{source}`, `{collection}`). Le rangement montre toujours un aperçu, et rien ne bouge avant validation.
 - **Quatre affichages** : tuiles avec fond de carte, liste + carte, liste, carte de toutes les traces.
@@ -22,7 +22,7 @@ Tauri 2 (cœur en Rust), React, Mantine et MapLibre. Interface en français, pou
 - Vent idéal, selon la méthode de biketeam : la trace part face au vent et revient vent dans le dos.
 - Sport lu dans le GPX (`<type>` de Komoot ou Garmin, ou un mot du titre) : Route, Gravel, VTT, Randonnée, Course à pied, Vélo.
 - Nom nettoyé (sans `_`, ni date, ni identifiant Openrunner), date lue dans le titre ; l'identifiant retiré est gardé dans les notes.
-- Points d'intérêt classés : contrôles, attention, eau, commerces, curiosités (codes Openrunner, symboles Garmin, puis nom).
+- Points d'intérêt classés : contrôles, attention, eau, commerces, curiosités, hébergement, services. La correspondance avec chaque plateforme (codes Openrunner, symboles Komoot, gpx.studio et Garmin, mots du nom) est dans un [tableau d'équivalences](crates/traces-core/data/poi-equivalences.md), facile à compléter.
 
 ### Fiche d'une trace
 
@@ -129,9 +129,19 @@ HAMMERHEAD_REDIRECT_URI=http://localhost:3001
 
 `npm run tauri build` les intègre alors à l'exécutable, où ils sont lisibles : **ces installateurs ne doivent pas être diffusés**. Pour diffuser, utiliser `npm run build:public`. Il ignore ce fichier, puis vérifie qu'aucun de ces identifiants ne se trouve dans l'exécutable ni dans les installateurs.
 
+## Sauvegarde de la configuration
+
+Réglages → **Sauvegarde de la configuration** : un fichier JSON pour retrouver sa configuration après une réinstallation, un crash ou sur un autre PC.
+
+- Il contient les bibliothèques et leurs réglages, les tags (détection, mots-clés), les collections et les tours, et pour chaque trace le nom et le sport choisis, les tags, les notes ; plus le thème, la FTP et le dossier Zwift.
+- Les traces sont retrouvées par l’empreinte de leur fichier, même si la bibliothèque a changé de place.
+- La restauration montre d’abord un aperçu. Elle ne supprime rien et ne modifie pas les fichiers GPX.
+- **Sauvegarde automatique** en option : une fois par jour au lancement, dans le dossier de ton choix (par exemple sur le NAS), en gardant les 10 dernières.
+- Les mots de passe et jetons n’y sont jamais : il faut reconnecter Komoot, Hammerhead et intervals.icu après une restauration.
+
 ## Données et sécurité des fichiers
 
-- L'index est dans `%APPDATA%\fr.organisons.app\index.sqlite`. La version de développement utilise `index-dev.sqlite`, une copie faite au premier lancement. Supprimer l'index remet l'appli à zéro ; les tags et notes écrits dans les GPX reviennent à la relecture.
+- L'index est dans `%APPDATA%\fr.organisons.app\index.sqlite`. La version de développement utilise `index-dev.sqlite`, une copie faite au premier lancement. Supprimer l'index remet l'appli à zéro : la sauvegarde de la configuration permet de tout retrouver ; sans elle, seuls les tags et notes écrits dans les GPX reviennent à la relecture.
 - Tes fichiers GPX ne sont modifiés ou déplacés que si tu l'as demandé :
   - écriture des tags, des notes et du nom choisi (option par bibliothèque) ;
   - rangement validé dans l’aperçu, ou renommage d’une trace (son fichier suit) ;
@@ -157,6 +167,7 @@ crates/traces-core/     cœur Rust sans interface, testé seul
   src/tour.rs           export des tours
   src/workout.rs        séances .zwo
   src/device.rs         GPX préparé pour un appareil
+  src/poi.rs            reconnaissance des POI d’après data/poi-equivalences.md
   tests/brm600.rs       tests sur une trace synthétique au format Openrunner (fixtures/boucle-600.gpx)
 src-tauri/src/          application Tauri : commandes (lib.rs), Komoot, Openrunner, Hammerhead,
                         Zwift et intervals.icu (training.rs), gpx.studio et dossier surveillé,
@@ -180,7 +191,6 @@ Ces vérifications tournent aussi automatiquement sur GitHub (GitHub Actions, `.
 
 ## Feuille de route
 
-- **v0.7** : sauvegarde de la configuration dans un fichier (bibliothèques, réglages, tags, collections, tours, notes…), à réimporter après une réinstallation ou sur un autre PC. Sans les mots de passe ni les jetons.
 - **Autres appareils GPS** : à l’étude.
 - **Plus tard** : version macOS, éditeur intégré, agenda Pédalons, fonds de carte sombres.
 

@@ -196,6 +196,47 @@ pub fn apply(index: &Index, library: &Library, moves: &[PlannedMove]) -> Result<
     Ok(report)
 }
 
+/// Sport indiqué par le dossier d'un fichier d'une bibliothèque gérée, si le
+/// chemin suit le modèle de rangement (`{sport}/…`) et que ce dossier est un sport connu.
+pub fn sport_in_path(library: &Library, path: &str) -> Option<&'static str> {
+    let pattern: Vec<&str> = library.pattern.split(['/', '\\']).filter(|s| !s.is_empty()).collect();
+    let pos = pattern.iter().position(|s| *s == "{sport}")?;
+    if pos + 1 >= pattern.len() {
+        return None; // {sport} dans le nom du fichier : pas un dossier.
+    }
+    let rel = Path::new(path).strip_prefix(&library.path).ok()?;
+    let parts: Vec<String> = rel.components().map(|c| c.as_os_str().to_string_lossy().to_string()).collect();
+    if parts.len() != pattern.len() {
+        return None; // Fichier qui ne suit pas (encore) le modèle.
+    }
+    let folder = parts[pos].to_lowercase();
+    crate::sport::SPORTS.iter().copied().find(|s| s.to_lowercase() == folder)
+}
+
+/// Dans une bibliothèque gérée, un fichier déjà rangé dans le dossier d'un sport
+/// garde ce sport : il devient le sport choisi de la trace s'il diffère de celui
+/// du GPX. Sert quand l'index est reconstruit (réinstallation, bibliothèque
+/// rajoutée ou passée en gérée) : sinon « Ranger » voudrait déplacer des fichiers
+/// bien classés. `only` limite aux traces données. Renvoie le nombre de traces concernées.
+pub fn adopt_folder_sports(index: &Index, library: &Library, only: Option<&[i64]>) -> Result<usize> {
+    if library.mode != "managed" {
+        return Ok(0);
+    }
+    let mut n = 0;
+    for (id, path, sport) in index.traces_without_user_sport(library.id)? {
+        if only.is_some_and(|ids| !ids.contains(&id)) {
+            continue;
+        }
+        if let Some(folder) = sport_in_path(library, &path) {
+            if folder != sport {
+                index.set_sport(id, Some(folder))?;
+                n += 1;
+            }
+        }
+    }
+    Ok(n)
+}
+
 /// Après un renommage, le fichier prend aussi le nom de la trace, tout de suite :
 /// - bibliothèque gérée : rangé selon son modèle (comme « Ranger », pour cette trace seulement) ;
 /// - bibliothèque indexée qui autorise l'écriture : renommé dans son dossier ;

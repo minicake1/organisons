@@ -7,21 +7,11 @@
 
 use std::path::Path;
 
-use crate::analyze::classify_poi;
 use crate::model::PoiKind;
 use crate::{Error, Result};
 
-/// Catégorie Hammerhead d'un point d'intérêt Organisons.
-pub fn hammerhead_type(kind: PoiKind) -> &'static str {
-    match kind {
-        PoiKind::Control => "Generic",
-        PoiKind::Warning => "Danger",
-        PoiKind::Water => "Water",
-        PoiKind::Shop => "Food",
-        PoiKind::Sight => "Summit",
-        PoiKind::Other => "Generic",
-    }
-}
+// Correspondance des catégories et des symboles avec les types du Karoo :
+// tableau `data/poi-equivalences.md` (module `poi`).
 
 /// GPX à envoyer au Karoo : la trace telle quelle, et les points d'intérêt avec
 /// un type et un symbole qu'il comprend (noms, descriptions et positions gardés).
@@ -30,9 +20,16 @@ pub fn hammerhead_gpx(path: &Path) -> Result<Vec<u8>> {
     let file = std::fs::File::open(path).map_err(|source| Error::Io { path: path.to_owned(), source })?;
     let mut gpx = gpx::read(std::io::BufReader::new(file))
         .map_err(|e| Error::Invalid(format!("{} : GPX illisible ({e})", path.display())))?;
+    let rules = crate::poi::rules();
     for w in &mut gpx.waypoints {
-        let kind = classify_poi(w.symbol.as_deref(), w.name.as_deref().unwrap_or(""));
-        let t = hammerhead_type(kind).to_string();
+        let name = w.name.clone().unwrap_or_default();
+        let kind = rules.classify(w.symbol.as_deref(), w.type_.as_deref(), &name);
+        // Type Karoo précis quand le symbole d'origine en a un (Camping, Parking…).
+        let t = rules.karoo_type(w.symbol.as_deref(), w.type_.as_deref(), kind).to_string();
+        // Le Karoo n'a pas de type « contrôle » : le nom le dit.
+        if kind == PoiKind::Control && rules.classify(None, None, &name) != PoiKind::Control {
+            w.name = Some(format!("CP {}", name.trim()).trim().to_string());
+        }
         w.symbol = Some(t.clone());
         w.type_ = Some(t);
     }

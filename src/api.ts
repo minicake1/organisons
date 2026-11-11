@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 
 export type Hilliness = 'FLAT' | 'HILLY' | 'MOUNTAINOUS'
 export type Wind = 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW'
-export type PoiKind = 'control' | 'warning' | 'water' | 'shop' | 'sight' | 'other'
+export type PoiKind = 'control' | 'warning' | 'water' | 'shop' | 'sight' | 'lodging' | 'service' | 'other'
 export type SortKey = 'date' | 'distance' | 'elevation' | 'hilliness' | 'name' | 'sport'
 
 export interface Library {
@@ -173,6 +173,14 @@ export const api = {
     invoke<ScanReport>('add_library', { name, path, mode, writeGpx }),
   removeLibrary: (id: number) => invoke<void>('remove_library', { id }),
   setLibraryWriteGpx: (id: number, writeGpx: boolean) => invoke<void>('set_library_write_gpx', { id, writeGpx }),
+  setLibraryMode: (id: number, mode: Library['mode']) => invoke<void>('set_library_mode', { id, mode }),
+  uiPrefsSync: (ui: Record<string, string>) => invoke<void>('ui_prefs_sync', { ui }),
+  backupExport: (path: string, ui: Record<string, string>) => invoke<void>('backup_export', { path, ui }),
+  backupPreview: (path: string) => invoke<RestorePreview>('backup_preview', { path }),
+  backupRestore: (path: string) => invoke<RestoreReport>('backup_restore', { path }),
+  backupAutoGet: () => invoke<AutoBackup>('backup_auto_get'),
+  backupAutoSet: (dir: string, keep: number) => invoke<AutoBackup>('backup_auto_set', { dir, keep }),
+  backupAutoNow: () => invoke<string | null>('backup_auto_now'),
   planOrganize: (libraryId: number) => invoke<PlannedMove[]>('plan_organize', { libraryId }),
   applyOrganize: (libraryId: number, moves: PlannedMove[]) => invoke<OrganizeReport>('apply_organize', { libraryId, moves }),
   importFiles: (libraryId: number, files: string[]) => invoke<OrganizeReport>('import_files', { libraryId, files }),
@@ -372,4 +380,32 @@ export interface Inbox {
   items: InboxItem[]
   /** Une modification gpx.studio attend son retour. */
   waiting: boolean
+}
+
+/** Ce que ferait la restauration d'une sauvegarde. */
+export interface RestorePreview {
+  createdAt: number
+  app: string
+  librariesNew: string[]
+  librariesChanged: string[]
+  librariesUnreachable: string[]
+  settings: number
+  tags: number
+  collections: number
+  tracesTotal: number
+  tracesFound: number
+}
+export interface RestoreReport {
+  librariesAdded: number
+  tracesRestored: number
+  tracesMissing: number
+  collections: number
+  tags: number
+  errors: string[]
+  ui: Record<string, string>
+}
+export interface AutoBackup {
+  dir: string
+  keep: number
+  last: number | null
 }

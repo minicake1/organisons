@@ -28,6 +28,8 @@ Tout le texte visible par l'utilisateur est en français.
   - `tour.rs` : export des tours (un GPX, une piste par étape, ou étape par étape).
   - `workout.rs` : lecture des `.zwo` (blocs, durée, IF, TSS).
   - `device.rs` : GPX préparé pour un appareil (POI Hammerhead, nom de fichier ASCII, multipart).
+  - `index.rs` : `set_library_mode` (v0.7) change le mode d’une bibliothèque existante (Réglages, avec confirmation ; modèle par défaut si besoin). Avant, le mode choisi à l’ajout était définitif : une bibliothèque rajoutée « indexée sur place » après une réinstallation perdait « Ranger ». `organize::adopt_folder_sports` : dans une bibliothèque gérée, un fichier déjà rangé dans le dossier d’un sport (chemin conforme au modèle, `{sport}` en dossier) garde ce sport comme sport choisi s’il diffère du GPX ; appliqué au passage en gérée, aux nouvelles traces d’une relecture, et une fois par bibliothèque (`sports_dossiers_v1_<id>`). Sinon, après une reconstruction de l’index, « Ranger » voulait déplacer des fichiers bien classés (choix de sport perdus).
+  - `poi.rs` : reconnaissance des POI d’après le **tableau d’équivalences** `data/poi-equivalences.md` (Markdown lisible sur GitHub, intégré à la compilation par `include_str!`, vérifié par les tests) : catégories et type Karoo de chacune, symboles des plateformes (`<sym>`, sinon `<type>`) avec leur catégorie et un type Karoo précis facultatif, mots du nom (mots entiers, `*` pour un début de mot, sans accents). Pour l’enrichir : ajouter une ligne, `cargo test -p traces-core`, et augmenter `ANALYSIS_VERSION` pour reclasser les traces. Les highlights Komoot (« Flag, Blue ») sont classés par leur nom, sinon en curiosités. Mesuré le 11/11/2026 sur la bibliothèque : POI Komoot en « autre » passés de 538 sur 649 à 3 ; l’ancien test « contient eau » prenait les châteaux, bateaux et ruisseaux pour des points d’eau. Envoi au Karoo : type précis du symbole (Camping, Parking, Summit…), sinon celui de la catégorie ; une curiosité part en Generic (plus en Summit) ; un contrôle est préfixé « CP » s’il ne le dit pas déjà.
   - `scan.rs` : `scan_library_shared` prend l'index fichier par fichier (trait `IndexAccess`, `Mutex<Index>`) : l'interface reste utilisable pendant une relecture.
   - `organize.rs` : aussi `replace_trace_file` (version modifiée à la place du GPX, ancienne dans la corbeille, tags/notes/collections gardés).
 - `src-tauri/src/` :
@@ -52,7 +54,7 @@ Tout le texte visible par l'utilisateur est en français.
   | Commerces | 50 | non |
   | Curiosités | 60 | non |
 
-  Viennent ensuite les symboles Garmin, puis le nom du POI.
+  Viennent ensuite les symboles Garmin, puis le nom du POI. Depuis la v0.7, tout cela est dans le **tableau d’équivalences** `crates/traces-core/data/poi-equivalences.md` (voir Architecture), avec deux catégories de plus : Hébergement et Services (non affichées par défaut).
 - Bibliothèque : filtres de Pédalons + source, tags, tri croissant ou décroissant. 4 affichages dans cet ordre : grille, liste + carte (seule la trace sélectionnée, carte centrée dessus), liste, carte.
 - Fiche trace :
   - le profil est coloré selon la pente la plus forte du tronçon, pour ne pas lisser les passages raides ;
@@ -136,18 +138,14 @@ Avant de pousser une nouvelle version (changement du numéro dans `package.json`
 
 ## Feuille de route
 
-### v0.7 : sauvegarde de la configuration (à étudier)
-- **Fichier de sauvegarde** exportable et réimportable (JSON lisible, par exemple `organisons-sauvegarde-AAAA-MM-JJ.json`), depuis Réglages, pour retrouver sa configuration après une réinstallation, sur un autre PC ou après avoir supprimé l'index.
-- Contenu envisagé :
-  - bibliothèques (nom, chemin, mode, modèle de rangement, écriture dans les GPX) ;
-  - réglages : dossier surveillé, vidages automatiques (corbeille, doublons), thème, FTP, dossier Zwift (ces trois derniers sont aujourd'hui dans le `localStorage` de l'appli) ;
-  - tags (détection auto, mots-clés), collections et tours (ordre des étapes) ;
-  - données propres à chaque trace : tags, notes, sport et nom choisis, collections, tags proposés ignorés, paires « pas des doublons » ;
-  - parcours déjà importés (Komoot, Openrunner) et envois mémorisés (Karoo, séances).
-- Les traces sont retrouvées à la restauration par l'empreinte du fichier (SHA-256), puis par le chemin : une bibliothèque déplacée ou un NAS renommé reste reconnu.
-- **Jamais de secrets** dans le fichier : jetons et clés (Komoot, Hammerhead, intervals.icu) restent dans le gestionnaire d'identifiants de Windows, à reconnecter après une restauration.
-- Restauration avec aperçu (ce qui sera ajouté ou remplacé) avant d'écrire quoi que ce soit ; option de sauvegarde automatique régulière (dans un dossier choisi, par exemple sur le NAS), en gardant les N dernières.
-- Les tags et notes déjà écrits dans les GPX (bibliothèques avec écriture) reviennent aussi à la relecture ; la sauvegarde couvre tout le reste.
+### v0.7 : sauvegarde de la configuration (faite le 11/11/2026)
+- **Réglages → Sauvegarde de la configuration** (`BackupPanel`) : « Enregistrer une sauvegarde… » (fichier JSON lisible `organisons-sauvegarde-AAAA-MM-JJ.json`) et « Restaurer… » avec un aperçu avant d’écrire. Module `traces-core/src/backup.rs` (`export`, `parse`, `preview`, `restore_libraries`, `restore_data`, `write_to_dir`), commandes `backup_*` dans `lib.rs`.
+- Contenu : bibliothèques (chemin, mode, modèle, écriture dans les GPX), réglages (sauf les internes : `analysis_version`, `inbox_*`, `gpxstudio_sessions`, `last_backup`, `ui_prefs`, `sports_dossiers_*`…), tags (détection, mots-clés), collections et tours (ordre des étapes), pour chaque trace le nom et le sport choisis, les tags, les notes, les tags proposés écartés ; doublons écartés, imports Komoot/Openrunner, envois au Karoo (traces et séances) ; préférences de l’interface (`localStorage` : thème, FTP, dossier Zwift ; `src/uiPrefs.ts`, copiées dans l’index au démarrage pour la sauvegarde automatique).
+- Traces retrouvées par l’empreinte SHA-256 du fichier, puis par le chemin (`Matcher`) : une bibliothèque déplacée ou un autre PC fonctionnent. Format versionné (`format`, `version`) : une sauvegarde d’une version plus récente est refusée.
+- Restauration : bibliothèques absentes ajoutées puis lues (injoignables signalées), réglages des bibliothèques existantes remis ; ce que la sauvegarde contient remplace les données des traces retrouvées, rien d’autre n’est supprimé ; les GPX ne sont pas modifiés ; l’interface se recharge pour appliquer thème et préférences.
+- **Jamais de secrets** : jetons et clés restent dans le gestionnaire d’identifiants ; reconnecter les comptes après une restauration.
+- **Sauvegarde automatique** (option) : dossier choisi (par exemple sur le NAS), au lancement si la dernière date de plus d’un jour, en gardant les N plus récentes (10 par défaut, réglages `backup_dir`, `backup_keep`, `last_backup`). Seuls les fichiers `organisons-sauvegarde-*.json` du dossier sont supprimés par la rotation.
+- Testé (`sauvegarde_et_restauration_de_la_configuration`) : réinstallation (index neuf, mêmes dossiers) et autre PC (fichier déplacé et renommé, retrouvé par son empreinte).
 
 ### Publication (dépôt public depuis le 10/11/2026)
 - **Fait** :

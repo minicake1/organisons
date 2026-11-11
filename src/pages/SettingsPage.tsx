@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
   ActionIcon,
-  Badge,
   Button,
   Checkbox,
   Code,
@@ -24,6 +23,7 @@ import { api, type Library, type ScanReport } from '../api'
 import ManagedActions, { type ActionResult } from '../components/ManagedActions'
 import PatternEditor from '../components/PatternEditor'
 import CreditsPanel from '../components/CreditsPanel'
+import BackupPanel from '../components/BackupPanel'
 
 export default function SettingsPage() {
   const { colorScheme, setColorScheme } = useMantineColorScheme()
@@ -56,6 +56,23 @@ export default function SettingsPage() {
     } finally {
       setBusy(false)
     }
+  }
+
+  // Passer en bibliothèque gérée autorise Organisons à déplacer les fichiers (« Ranger »,
+  // renommage) : toujours confirmé. Aucun fichier ne bouge au moment du changement.
+  const changeMode = (l: Library, mode: Library['mode']) => {
+    if (mode === l.mode) return
+    const ok =
+      mode === 'managed'
+        ? window.confirm(
+            `« ${l.name} » devient une bibliothèque gérée : Organisons pourra y importer des GPX et ranger les fichiers selon un modèle de dossiers (toujours avec un aperçu à valider), et renommer le fichier d'une trace renommée. Rien ne bouge maintenant. Continuer ?`,
+          )
+        : window.confirm(`« ${l.name} » redevient indexée sur place : Organisons n'y déplacera plus aucun fichier. Continuer ?`)
+    if (!ok) return
+    api
+      .setLibraryMode(l.id, mode)
+      .then(refresh)
+      .catch((e) => setError(String(e)))
   }
 
   const toggleWrite = (l: Library, v: boolean) => {
@@ -104,9 +121,15 @@ export default function SettingsPage() {
               <Stack gap={4} style={{ flex: 1, minWidth: 0 }}>
                 <Group gap="xs">
                   <Text fw={600}>{l.name}</Text>
-                  <Badge variant="light" color={l.mode === 'managed' ? 'indigo' : 'gray'}>
-                    {l.mode === 'managed' ? 'Bibliothèque gérée' : 'Indexée sur place'}
-                  </Badge>
+                  <SegmentedControl
+                    size="xs"
+                    value={l.mode}
+                    data={[
+                      { value: 'index', label: 'Indexée sur place' },
+                      { value: 'managed', label: 'Bibliothèque gérée' },
+                    ]}
+                    onChange={(v) => changeMode(l, v as Library['mode'])}
+                  />
                 </Group>
                 <Code>{l.path}</Code>
               </Stack>
@@ -193,6 +216,8 @@ export default function SettingsPage() {
       </Paper>
 
 
+      <Title order={2} mt="md">Sauvegarde de la configuration</Title>
+      <BackupPanel />
       <Title order={2} mt="md">À propos et crédits</Title>
       <CreditsPanel />
     </Stack>
