@@ -26,5 +26,5 @@ serde_json.workspace = true
 # Komoot (API interne, non officielle) : requêtes HTTP et jeton rangé dans le
 # gestionnaire d'identifiants de Windows.
 ureq = "2"
-base64 = "0.22"
+base64 = "0.23"
 keyring = { version = "3", features = ["windows-native"] }
